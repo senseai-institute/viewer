@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+out/
+demo/
+node_modules/
+src/senseai_viewer/static/
+test-results/
