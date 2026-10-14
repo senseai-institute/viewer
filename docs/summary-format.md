@@ -60,7 +60,7 @@ UTF-8, `indent=2`, keys sorted. Example (abridged) for the synthetic DSEC fixtur
   "exporter": { "name": "senseai-viewer", "version": "0.1.0", "senseai_ingest_version": "0.1.0" },
   "format": "senseai-viewer/summary",
   "n_ticks": 100,
-  "recording_id": "zurich-city-04-a",
+  "recording_id": "zurich_city_04_a",
   "source_file": "zurich_city_04_a.h5",
   "sources": [
     {
@@ -120,7 +120,7 @@ UTF-8, `indent=2`, keys sorted. Example (abridged) for the synthetic DSEC fixtur
 | `sources[].nominal_rate_hz` | float | From the `SourceSpec`. |
 | `sources[].n_samples` | int | Total samples. Equals the sum of `timeline.samples:<sid>`. |
 | `sources[].n_events` | int | Total events for EVENT sources, `0` otherwise. |
-| `sources[].spec` | object | The stored `SourceSpec`, minus the fields shown at the top level: `clock_mode`, `offset_ns`, `offset_ref_ns`, `drift_ppm`, `jitter_ns`, `offset_samples` and `meta`. ns offsets are strings. `meta` values that are arrays become nested lists. The `meta` keys **`file`, `dir`, `path` and `root` are removed**: they hold paths on the computer that ran the replay and are not useful in the viewer. |
+| `sources[].spec` | object | The rest of the stored `SourceSpec`: `clock_mode`, `offset_ns`, `offset_ref_ns`, `drift_ppm`, `jitter_ns`, `offset_samples` and `meta`. `source_id`, `modality` and `nominal_rate_hz` are at the top level instead. ns offsets are strings. `meta` values that are arrays become nested lists. The `meta` keys **`file`, `dir`, `path` and `root` are removed**: they hold paths on the computer that ran the replay and are not useful in the viewer. |
 | `sources[].trace` | string \| null | Relative path of the trace file, or `null` if this modality has none. |
 | `sources[].thumbs` | int | Number of thumbnails, from 0 to 60. |
 | `stats` | object \| null | The tick file's `stats` attribute, copied as-is, except that NaN becomes `null` and `t0_ns` becomes a string. It is `null` if the attribute is missing. Its shape is `Aligner.stats()` from `senseai-ingest`. The viewer reads `ticks`, `sync_jitter_p50_ns`, `sync_jitter_p99_ns`, `staleness_p50_ns`, `staleness_p99_ns`, and per source `samples_per_s`, `dropped` and `late`. It ignores other keys. |
@@ -139,8 +139,8 @@ One row per tick, in tick order, with exactly `n_ticks` rows.
 | `samples:<sid>` | uint32 | Samples of source `<sid>` in this tick. There is one column per source, in manifest order. |
 | `events:<sid>` | uint32 | Events of source `<sid>` in this tick. This column exists **for EVENT sources only**. |
 
-Writer settings are zstd compression, one row group and no dictionary encoding on the count
-columns. At 10⁵ ticks with 4 sources the file stays below about 1 MB.
+All Parquet files are written with zstd compression, without dictionary encoding, and with
+statistics. At 10⁵ ticks with 4 sources the file stays below about 1 MB.
 
 ## `traces/<sid>.parquet`
 
@@ -190,11 +190,11 @@ with aspect ratio preserved. Images narrower than 320 px are not upscaled.
   - When a source has `N` frames, the exporter picks `n = min(N, 60)` of them, at sample
     indices `⌊i·N/n⌋` for i = 0 … n−1.
   - It converts each frame by encoding:
-    - `rgb8`: kept as RGB.
+    - `rgb*`: kept as RGB. A 3-channel frame without an `encoding` is also treated as RGB.
     - `mono8`: kept as grayscale.
     - `mono16` and other uint16 frames: shifted right by 8 bits.
     - `bayer_*`: shown as grayscale, without debayering.
-    - `bgr8`: channels swapped to RGB.
+    - `bgr*`: channels swapped to RGB.
     - Anything else: the first channel, shown as grayscale.
 - **EVENT sources.**
   - The exporter picks up to 60 ticks at `⌊i·K/n⌋`, where `n = min(K, 60)`.

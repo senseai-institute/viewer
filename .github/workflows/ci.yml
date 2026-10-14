@@ -1,0 +1,62 @@
+# Copyright 2026 SenseAI Institute
+# SPDX-License-Identifier: Apache-2.0
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: |
+          uv sync --extra dev
+          cd frontend && npm ci
+      - name: Install Chromium for Playwright
+        run: uv run playwright install --with-deps chromium
+      - run: make lint
+      - run: make type
+      - run: make build
+      - run: make test
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t senseai-viewer .
+      - name: Refuses to start without a password in production
+        run: |
+          if docker run --rm -e RAILWAY_ENVIRONMENT=ci -e S3_BUCKET=b senseai-viewer; then
+            echo "expected a non-zero exit"; exit 1
+          fi
+      - name: Health check with the five Railway variables
+        run: |
+          docker run -d --name viewer -p 8000:8000 -e RAILWAY_ENVIRONMENT=ci \
+            -e S3_BUCKET=b -e AWS_REGION=eu-central-1 -e AWS_ACCESS_KEY_ID=x \
+            -e AWS_SECRET_ACCESS_KEY=y -e VIEWER_PASSWORD=pw senseai-viewer
+          for i in $(seq 1 30); do curl -fsS localhost:8000/healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/)" = 401
+          test "$(curl -s -u u:pw -o /dev/null -w '%{http_code}' localhost:8000/)" = 200
+          docker rm -f viewer

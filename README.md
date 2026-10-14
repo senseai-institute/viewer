@@ -3,11 +3,8 @@
 Browse [`senseai-ingest`](https://github.com/senseai-institute/ingest) recordings in a web browser.
 You don't need Python, HDF5 or a work computer to use it.
 
-> **Status: design review.** This README and [`docs/summary-format.md`](docs/summary-format.md)
-> describe the planned behaviour. The implementation comes next.
-
 ![Recording view: stats card, stacked per-source timeline and scrubber with thumbnails](docs/screenshot.png)
-<sub>*(placeholder: `make demo` regenerates this screenshot)*</sub>
+<sub>The recording view on a synthetic DSEC recording. `make demo` regenerates this screenshot.</sub>
 
 `senseai-ingest replay` writes **tick files**: HDF5 files, from tens to hundreds of MB, that
 record what every sensor produced in each 10 ms tick. The viewer turns them into something you
@@ -62,7 +59,7 @@ pip install "senseai-viewer @ git+https://github.com/senseai-institute/viewer.gi
 # 1. Make a tick file with senseai-ingest, if you don't have one yet
 senseai-ingest replay --dataset dsec --path /data/dsec/zurich_city_04_a --out zurich_city_04_a.h5 --stats
 
-# 2. Export a summary to ./out/zurich-city-04-a/
+# 2. Export a summary to ./out/zurich_city_04_a/
 senseai-viewer export zurich_city_04_a.h5
 
 # 3. Export and upload to s3://$S3_BUCKET/$S3_PREFIX/<id>/ (S3_PREFIX defaults to "viewer")
@@ -72,7 +69,8 @@ S3_BUCKET=my-bucket AWS_REGION=eu-central-1 senseai-viewer export zurich_city_04
 - `--id` sets the recording id. By default the exporter derives it from the file name.
 - `--out DIR` changes the local output root, which defaults to `./out`.
 - Exports are deterministic: the same tick file always gives the same summary.
-- Exporting a 1,000-tick, 4-source file takes a few seconds.
+- Exporting a 1,000-tick, 4-source DSEC file (2 × 200k events/s plus 2 cameras) takes about
+  17 s. Nearly all of that time is spent reading the tick file through `TickReader`.
 - The upload uses the standard AWS credential chain, such as environment variables or
   `~/.aws`. It writes `manifest.json` last, so the viewer never shows half-uploaded recordings.
 
@@ -113,7 +111,7 @@ password is not sent in clear text.
 You don't need S3 to run the viewer locally. Point it at a folder of summaries instead:
 
 ```bash
-make demo          # generates a synthetic DSEC fixture, replays it, exports it, serves it at http://localhost:8000
+make demo          # synthetic DSEC fixtures → senseai-ingest replay → export → serve at http://127.0.0.1:8000
 ```
 
 Or run the steps yourself:
@@ -122,10 +120,12 @@ Or run the steps yourself:
 uv sync --extra dev
 (cd frontend && npm ci && npm run build)
 senseai-viewer export ticks.h5                     # writes ./out/<id>/
-LOCAL_SUMMARIES=./out uv run uvicorn senseai_viewer.api.app:app --port 8000
+uv run senseai-viewer serve --summaries ./out --port 8000
+# equivalent: LOCAL_SUMMARIES=./out uv run uvicorn senseai_viewer.api.app:create_app --factory --port 8000
 ```
 
 - When `LOCAL_SUMMARIES` is set, the server reads that folder and never contacts S3.
+- `make demo` also writes `docs/screenshot.png`. `DEMO_PORT` changes its port.
 - When `VIEWER_PASSWORD` is unset, it runs without a password. That is allowed only outside
   Railway.
 - For frontend work, run `npm run dev` in `frontend/`. It proxies `/api` to `localhost:8000`.
@@ -140,7 +140,7 @@ id and `{sid}` is the source id.
 | `GET /healthz` | `{"status": "ok"}`. This endpoint is not password-protected. |
 | `GET /api/recordings` | A summary row for each `<prefix>/*/manifest.json`. |
 | `GET /api/recordings/{id}` | The manifest. |
-| `GET /api/recordings/{id}/timeline` | `timeline.parquet` as columnar JSON. |
+| `GET /api/recordings/{id}/timeline` | `timeline.parquet` as columnar JSON: `{"n_rows", "columns": {name: [...]}, "meta"}`. Absolute ns timestamps are decimal strings. |
 | `GET /api/recordings/{id}/traces/{sid}` | `traces/{sid}.parquet` as columnar JSON. |
 | `GET /api/recordings/{id}/thumbs/index.json` | The thumbnail index. |
 | `GET /api/recordings/{id}/thumbs/{sid}/{k}.jpg` | One thumbnail, streamed from S3 and cached. |
@@ -162,7 +162,10 @@ make demo      # end-to-end: fixture → replay → export → serve → screens
 - The tests generate their tick files with `senseai_ingest.testing.make_dsec_fixture` and
   `senseai-ingest replay`, so CI needs no datasets or AWS.
 - The S3 path is tested once with `moto`.
-- GitHub Actions runs `make lint type build test` on every push.
+- GitHub Actions (`.github/workflows/ci.yml`) runs `make lint type build test` on every push. It
+  also builds the Docker image and checks that the image refuses to start without a password,
+  and that it passes the health check with the five Railway variables.
+- The Playwright test needs Chromium. Install it with `uv run playwright install chromium`.
 
 ```
 src/senseai_viewer/
@@ -171,6 +174,7 @@ src/senseai_viewer/
   static/      built frontend (generated, not committed)
 frontend/      Vite + TypeScript SPA, uPlot charts
 tests/         pytest (export, API, moto) + Playwright smoke test
+scripts/       demo.py (make demo)
 docs/          summary-format.md, screenshot.png
 ```
 
