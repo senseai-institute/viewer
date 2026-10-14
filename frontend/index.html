@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Copyright 2026 SenseAI Institute. SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>SenseAI Viewer</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='9' width='3' height='6' fill='%232f6fde'/%3E%3Crect x='6' y='4' width='3' height='11' fill='%232f6fde'/%3E%3Crect x='11' y='1' width='3' height='14' fill='%232f6fde'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#/">SenseAI <span>Viewer</span></a>
+      <nav>
+        <a href="#/" data-nav="list">Recordings</a>
+        <a href="#/compare" data-nav="compare">Compare</a>
+      </nav>
+    </header>
+    <main id="app" aria-live="polite"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

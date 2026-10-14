@@ -1,0 +1,14 @@
+.git
+.venv
+**/node_modules
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+out
+demo
+src/senseai_viewer/static
+test-results
+tests
+docs
