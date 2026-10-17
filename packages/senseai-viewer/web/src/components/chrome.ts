@@ -14,14 +14,14 @@ export interface ChromeOpts {
   run?: string;
   title?: string;
   synthetic?: boolean;
-  current: "runs" | "replay" | "compare" | "incidents";
+  current: "runs" | "replay" | "compare" | "incidents" | "story";
   share?: boolean; // read-only share view: no navigation to other runs
 }
 
 export function topbar(o: ChromeOpts): HTMLElement {
   const bar = el("header", "topbar");
   const brand = el("a", "brand");
-  brand.href = o.share ? location.pathname : "/";
+  brand.href = o.share ? location.pathname : o.run ? `/s/${encodeURIComponent(o.run)}` : "/";
   brand.append(el("span", "brand-mark"), "SenseAI Viewer");
   bar.append(brand);
   if (!o.share) {
@@ -33,13 +33,14 @@ export function topbar(o: ChromeOpts): HTMLElement {
       if (o.current === id) a.setAttribute("aria-current", "page");
       nav.append(a);
     };
-    link("runs", "Runs", "/");
     if (o.run) {
       const r = encodeURIComponent(o.run);
-      link("replay", "Replay", `/replay/${r}`);
+      link("story", "Simple view", `/s/${r}`);
+      link("replay", "Detailed", `/replay/${r}`);
       link("compare", "Compare", `/compare/${r}`);
       link("incidents", "Incidents", `/incidents/${r}`);
     }
+    link("runs", "All runs", "/runs");
     bar.append(nav);
   }
   bar.append(el("span", "title", o.title ?? ""));

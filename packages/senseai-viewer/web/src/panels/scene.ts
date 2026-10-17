@@ -24,6 +24,7 @@ export interface SceneInput {
 const EVENT_TRAIL_S = 0.03;
 const FRAME_GAIN = 3;
 const LIT = 0.05;
+const SIMPLE_MIN = 0.12; // simple view: draw only strong signals, not background specks
 const BEARING_FULL = 1.5;
 const TEAL = "#5EEAD4";
 const WARN = "#F2B35C";
@@ -64,8 +65,9 @@ export class Scene {
   private camW: number;
   private camH: number;
   private mapPx = 560;
+  private simple = false;
 
-  constructor(index: RunIndex, opts: { compact?: boolean; stacked?: boolean } = {}) {
+  constructor(index: RunIndex, opts: { compact?: boolean; stacked?: boolean; simple?: boolean } = {}) {
     this.index = index;
     this.camW = index.camera?.width || 346;
     this.camH = index.camera?.height || 260;
@@ -89,6 +91,12 @@ export class Scene {
     this.tooltip = el("div", "tooltip");
     mapView.append(this.tooltip);
     scene.append(camView, mapView);
+    this.simple = !!opts.simple;
+    if (opts.simple) {
+      mapView.remove();
+      scene.style.gridTemplateColumns = "minmax(0,1fr)";
+      camView.querySelector(".view-label")?.remove();
+    }
     if (opts.compact) scene.style.gridTemplateColumns = "minmax(0,1fr) minmax(0,0.75fr)";
     if (opts.stacked) {
       scene.style.gridTemplateColumns = "minmax(0,1fr)";
@@ -97,6 +105,7 @@ export class Scene {
     }
     this.hud = el("div", "hud");
     this.root.append(scene, this.hud);
+    if (opts.simple) this.hud.style.display = "none";
     this.camCtx = this.cam.getContext("2d")!;
     this.mapCtx = this.map.getContext("2d")!;
     this.evBuf = document.createElement("canvas");
@@ -117,8 +126,10 @@ export class Scene {
   render(inp: SceneInput): void {
     this.last = inp;
     this.drawCamera(inp);
-    this.drawMap(inp);
-    this.drawHud(inp);
+    if (!this.simple) {
+      this.drawMap(inp);
+      this.drawHud(inp);
+    }
     if (this.hover) this.drawTooltip(null, null);
   }
 
@@ -176,7 +187,9 @@ export class Scene {
         const x0 = -E + ix * c;
         if (x0 < 0.3) continue;
         for (let iy = 0; iy < G; iy++) {
-          const col = heat(s.grid[ix * G + iy], inp.colorblind);
+          const v = s.grid[ix * G + iy];
+          if (this.simple && v < SIMPLE_MIN) continue;
+          const col = heat(v, inp.colorblind);
           if (col[3] === 0) continue;
           const y0 = -E + iy * c;
           const pts = [this.project(x0, y0), this.project(x0 + c, y0), this.project(x0 + c, y0 + c), this.project(x0, y0 + c)];
@@ -242,7 +255,7 @@ export class Scene {
       for (const a of s.actors) this.personBox(ctx, a.x, a.y, ALERT, "ground truth", true);
     }
     if (s && inp.layers.has("tracks")) {
-      for (const tr of s.tracks) this.personBox(ctx, tr.x, tr.y, TEAL, `${tr.label} ${tr.confidence.toFixed(2)}`, false);
+      for (const tr of s.tracks) this.personBox(ctx, tr.x, tr.y, TEAL, this.simple ? tr.label : `${tr.label} ${tr.confidence.toFixed(2)}`, false);
     }
     if (s?.warming) this.banner(ctx, "world model warming up");
   }

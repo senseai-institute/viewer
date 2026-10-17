@@ -32,10 +32,10 @@ export async function runsPage(root: HTMLElement): Promise<void> {
       a.href = href;
       actions.append(a);
     };
-    link("Replay", `/replay/${id}`, true);
+    link("Watch", `/s/${id}`, true);
+    link("Detailed view", `/replay/${id}`);
     if (r.pipelines.length > 1) link("Compare", `/compare/${id}`);
     link("Incidents", `/incidents/${id}`);
-    link("Share link", `/s/${id}`);
     c.append(h);
     if (r.synthetic) c.append(el("span", "badge warn", "synthetic data"));
     c.append(facts, actions);
