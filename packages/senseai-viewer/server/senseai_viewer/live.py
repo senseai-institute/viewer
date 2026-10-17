@@ -1,11 +1,9 @@
 # Copyright 2026 SenseAI Institute
 # SPDX-License-Identifier: Apache-2.0
-"""Routes for the live POC: footage and overlays of a RunLog, and the runner.
+"""Footage, overlays and reactions of a RunLog, and the Server-Sent Events tail.
 
-Video routes are always on (they only read RunLogs). Runner routes are registered only when
-``SENSEAI_RUNNER=1``; ``GET /api/runner/options`` then says whether runs can start. Without
-``VIEWER_PASSWORD`` the runner only answers requests from this machine (an SSH tunnel
-arrives as 127.0.0.1), because it starts processes.
+These routes only read RunLogs and are always on. The one-click POC routes (fetch, prepare,
+run) live in :mod:`senseai_viewer.api.run`.
 """
 
 from __future__ import annotations
@@ -14,31 +12,15 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Callable
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException, Response
 
 from senseai_viewer import video, wire
 from senseai_viewer.readers.runlog import RunLog
-from senseai_viewer.runner import Runner, RunnerBusy
-from senseai_viewer.settings import Settings
-from senseai_viewer.store import Store
 
-LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 SSE_POLL_S = 0.2
 SSE_PING_S = 15.0
-
-
-class RunRequest(BaseModel):
-    """Body of ``POST /api/runner/runs``."""
-
-    sequences: list[str] = Field(min_length=1)
-    arms: list[str] = Field(min_length=1)
-    max_seconds: float | None = None
 
 
 def _json(obj: object) -> Response:
@@ -127,81 +109,3 @@ async def tail_events(path: Path, done: Callable[[], bool]) -> AsyncIterator[byt
             yield b": ping\n\n"
             last = time.monotonic()
         await asyncio.sleep(SSE_POLL_S)
-
-
-def add_runner_routes(app: FastAPI, cfg: Settings, store: Callable[[], Store]) -> Runner:
-    """Register the runner API and return its :class:`Runner` (tests wait on it)."""
-
-    def link(run_id: str, paths: list[Path]) -> list[str]:
-        ids = []
-        for i, p in enumerate(paths):
-            ids.append(store().link(p, f"live-{run_id}-{i}-{p.stem}"))
-        return ids
-
-    runner = Runner(cfg, store().runs_dir.parent / "live", link)
-
-    def guard(request: Request) -> None:
-        if cfg.viewer_password:
-            return  # BasicAuth already checked the password
-        host = request.client.host if request.client else ""
-        if host not in LOOPBACK:
-            raise HTTPException(
-                403, "the runner is only reachable from this machine unless VIEWER_PASSWORD is set"
-            )
-
-    def meta(run_id: str) -> dict[str, Any]:
-        try:
-            m = runner.get(run_id)
-        except (KeyError, OSError) as e:
-            raise HTTPException(404, f"no run {run_id!r}") from e
-        return asdict(m) | {"active": runner.is_active(run_id)}
-
-    @app.get("/api/runner/options")
-    def options(request: Request) -> dict[str, object]:
-        guard(request)
-        return runner.options()
-
-    @app.post("/api/runner/runs", status_code=201)
-    def start(body: RunRequest, request: Request) -> dict[str, Any]:
-        guard(request)
-        try:
-            m = runner.start(body.sequences, body.arms, body.max_seconds)
-        except RunnerBusy as e:
-            raise HTTPException(
-                409, f"run {e.args[0]} is still going; wait for it or cancel it"
-            ) from e
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from e
-        return asdict(m) | {"active": runner.is_active(m.id)}
-
-    @app.get("/api/runner/runs")
-    def history(request: Request) -> list[dict[str, Any]]:
-        guard(request)
-        return [asdict(m) | {"active": runner.is_active(m.id)} for m in runner.history()]
-
-    @app.get("/api/runner/runs/{run_id}")
-    def one(run_id: str, request: Request) -> dict[str, Any]:
-        guard(request)
-        return meta(run_id)
-
-    @app.post("/api/runner/runs/{run_id}/cancel")
-    def cancel(run_id: str, request: Request) -> dict[str, Any]:
-        guard(request)
-        meta(run_id)
-        runner.cancel(run_id)
-        return meta(run_id)
-
-    @app.get("/api/runner/runs/{run_id}/events")
-    def events(run_id: str, request: Request) -> StreamingResponse:
-        guard(request)
-        try:
-            path = runner.events_path(run_id)
-        except (KeyError, OSError) as e:
-            raise HTTPException(404, f"no run {run_id!r}") from e
-        return StreamingResponse(
-            tail_events(path, lambda: not runner.is_active(run_id)),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
-
-    return runner

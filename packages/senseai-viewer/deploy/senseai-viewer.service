@@ -1,0 +1,32 @@
+# Copyright 2026 SenseAI Institute
+# SPDX-License-Identifier: Apache-2.0
+#
+# The SenseAI viewer with the Run page, on 127.0.0.1:8000 only (reach it through an SSH
+# tunnel: ssh -L 8000:localhost:8000 ubuntu@<ip>). deploy/setup_ec2.sh --service fills in
+# the @...@ placeholders and installs this as /etc/systemd/system/senseai-viewer.service.
+# Extra settings (VIEWER_PASSWORD, SENSEAI_S3_URI, ...) go in /etc/senseai-viewer.env.
+
+[Unit]
+Description=SenseAI viewer (Run page on 127.0.0.1:8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@VIEWER@
+Environment=SENSEAI_RUNNER=1
+Environment=SENSEAI_STACK_DIR=@STACK@
+Environment=SENSEAI_DATA_ROOT=@DATA@
+Environment=DATA_DIR=@STACK@/viewer-data
+Environment=DEMO_RUN=0
+Environment=PATH=@STACK@/.venv/bin:@STACK@/.tools/node/bin:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/senseai-viewer.env
+ExecStart=@VIEWER@/.venv/bin/senseai-viewer serve --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# Only the web server stops on restart; runs started from the page keep going and the
+# page picks them up again.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

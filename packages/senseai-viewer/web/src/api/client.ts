@@ -239,49 +239,119 @@ export interface Reactions {
   pair?: { a: string; b: string; both: number; only_a: number; only_b: number; neither: number; median_lead_s: number | null };
 }
 
-export interface RunnerArm {
+export interface RunArm {
   name: string;
   label: string;
   kind: "reflex" | "detector";
   blurb: string;
   available: boolean;
   reason: string;
+  needs_training: boolean;
+  benchmark_only: boolean;
 }
 
-export interface RunnerSequence {
+export interface Check {
+  ok: boolean;
+  message: string;
+  missing?: string[];
+  policy?: string;
+  fix?: string;
+}
+
+export interface SetupChecks {
+  stack: Check;
+  gpu: Check;
+  s3: Check;
+  github: Check;
+  data_root: Check;
+  script: Check;
+  all_ok: boolean;
+  install_job: string | null;
+}
+
+export type SeqStatus = "in_s3" | "local" | "downloading" | "downloaded" | "unpacking" | "arranging" | "validating" | "ready" | "problem" | "failed" | "preparing";
+
+export interface DataRow {
   name: string;
   path: string;
-  frames: number;
-  duration_s: number;
-  labels: boolean;
+  status: SeqStatus;
+  in_s3: boolean;
+  local: boolean;
+  size_bytes: number | null;
   brightness: number | null;
   night: boolean;
+  labels: boolean;
+  events: boolean;
+  frames: number | null;
+  duration_s: number | null;
+  problems: string[];
+  warnings: string[];
+  error: string | null;
+  actions: string[];
+  job: { id: string; status: string; frac: number | null; msg: string | null } | null;
 }
 
-export interface RunnerOptions {
-  enabled: boolean;
-  data_root?: string | null;
-  bench_found?: boolean;
-  sequences?: RunnerSequence[];
-  brightness_pending?: boolean;
-  arms?: RunnerArm[];
-  busy?: string | null;
+export interface DataIndex {
+  root: string;
+  s3: { ok: boolean; message: string; uri: string };
+  sequences: DataRow[];
 }
 
-export interface RunnerRun {
+export interface RunOptions {
+  arms: RunArm[];
+  sizes: { name: "small" | "gate1"; label: string }[];
+  default_steps: Record<string, number>;
+  split: { available: boolean; reason: string; train_fraction: number };
+  busy: string | null;
+}
+
+export interface JobStage {
+  name: string;
+  label: string;
+  status: "pending" | "running" | "done" | "skipped" | "failed" | "cancelled";
+  frac: number | null;
+  msg: string;
+  started: string | null;
+  ended: string | null;
+}
+
+export interface Summary {
+  arm: string;
+  sequence: string;
+  error: string | null;
+  [k: string]: unknown;
+}
+
+export interface Job {
   id: string;
+  kind: "poc" | "prepare" | "setup";
+  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+  params: Record<string, unknown>;
+  stages: JobStage[];
   created: string;
-  sequences: string[];
+  started: string | null;
+  ended: string | null;
+  error: string | null;
+  result: {
+    headline?: string;
+    summaries?: Summary[];
+    runlog_ids?: string[];
+    report_md?: string | null;
+    trained?: boolean;
+    status?: string;
+    problems?: string[];
+  } | null;
+  active: boolean;
+}
+
+export interface PocRequest {
+  train: string[];
+  test: string[];
+  split: boolean;
+  size: "small" | "gate1";
+  steps: number;
   arms: string[];
   max_seconds: number | null;
-  command: string[];
-  status: "running" | "finished" | "failed" | "cancelled";
-  exit_code: number | null;
-  headline: string;
-  error: string | null;
-  runlog_ids: string[];
-  ended: string | null;
-  active: boolean;
 }
 
 async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -303,14 +373,26 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
   return (await r.json()) as T;
 }
 
-export const runner = {
-  options: () => getJSON<RunnerOptions>("/api/runner/options"),
-  start: (sequences: string[], arms: string[], max_seconds: number | null) =>
-    send<RunnerRun>("POST", "/api/runner/runs", { sequences, arms, max_seconds }),
-  get: (id: string) => getJSON<RunnerRun>(`/api/runner/runs/${encodeURIComponent(id)}`),
-  history: () => getJSON<RunnerRun[]>("/api/runner/runs"),
-  cancel: (id: string) => send<RunnerRun>("POST", `/api/runner/runs/${encodeURIComponent(id)}/cancel`),
-  eventsUrl: (id: string) => `/api/runner/runs/${encodeURIComponent(id)}/events`,
+export const run = {
+  status: () => getJSON<{ enabled: boolean }>("/api/run/status"),
+  setup: (refresh = false) => getJSON<SetupChecks>(`/api/run/setup${refresh ? "?refresh=1" : ""}`),
+  install: () => send<Job>("POST", "/api/run/setup/install"),
+  data: (refresh = false) => getJSON<DataIndex>(`/api/run/data${refresh ? "?refresh=1" : ""}`),
+  prepare: (sequences: string[]) =>
+    send<{ started: Job[]; skipped: { sequence: string; why: string }[] }>("POST", "/api/run/data/prepare", { sequences }),
+  options: () => getJSON<RunOptions>("/api/run/options"),
+  start: (body: PocRequest) => send<Job>("POST", "/api/run/jobs", body),
+  jobs: (kind?: string) => getJSON<Job[]>(`/api/run/jobs${kind ? `?kind=${kind}` : ""}`),
+  job: (id: string) => getJSON<Job>(`/api/run/jobs/${encodeURIComponent(id)}`),
+  cancel: (id: string) => send<Job>("POST", `/api/run/jobs/${encodeURIComponent(id)}/cancel`),
+  resume: (id: string) => send<Job>("POST", `/api/run/jobs/${encodeURIComponent(id)}/resume`),
+  log: (id: string, stage?: string, lines = 40) =>
+    getJSON<{ stage: string | null; lines: string[] }>(
+      `/api/run/jobs/${encodeURIComponent(id)}/log?lines=${lines}${stage ? `&stage=${encodeURIComponent(stage)}` : ""}`,
+    ),
+  eventsUrl: (id: string) => `/api/run/jobs/${encodeURIComponent(id)}/events`,
+  reportUrl: (id: string) => `/api/run/jobs/${encodeURIComponent(id)}/report`,
+  system: () => getJSON<{ cpu: number | null; gpu: number | null; gpu_mem: number | null }>("/api/run/system"),
 };
 
 export const videoApi = {

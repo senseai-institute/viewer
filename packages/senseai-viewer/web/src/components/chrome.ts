@@ -18,7 +18,7 @@ export interface ChromeOpts {
   share?: boolean; // read-only share view: no navigation to other runs
 }
 
-/** Set once at start-up from /api/runner/options: whether to show the Run link. */
+/** Set once at start-up from /api/run/status: whether to show the Run link. */
 export const features = { runner: false };
 
 export function topbar(o: ChromeOpts): HTMLElement {

@@ -30,7 +30,10 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--events", required=True)
     ap.add_argument("--runlog", required=True)
-    a = ap.parse_args()
+    ap.add_argument("--run-id", default="fake")
+    a, _unknown = (
+        ap.parse_known_args()
+    )  # the real bench has more flags (--world-ckpt, --calibration, …)
     delay = float(os.environ.get("FAKE_BENCH_DELAY", "0.02"))
     mode = os.environ.get("FAKE_BENCH_MODE", "ok")
     arms = a.arms.split(",")
@@ -45,6 +48,8 @@ def main() -> int:
 
     emit(
         "run_start",
+        release_key=os.environ.get("SENSEAI_RELEASE_KEYS", ""),
+        sdk_config=a.sdk_config,
         sequences=[
             {
                 "name": s.name,
