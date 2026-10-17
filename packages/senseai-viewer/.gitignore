@@ -1,0 +1,8 @@
+server/senseai_viewer/static/
+web/node_modules/
+data/
+.venv/
+.coverage
+__pycache__/
+*.h5
+test-results/
