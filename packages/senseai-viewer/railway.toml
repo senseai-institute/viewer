@@ -1,9 +1,8 @@
 # Copyright 2026 SenseAI Institute
 # SPDX-License-Identifier: Apache-2.0
 #
-# Railway service config for senseai-viewer. In the service settings set
-#   Root Directory      = packages/senseai-viewer
-#   Config-as-code path = /packages/senseai-viewer/railway.toml
+# Railway service config used when the service's Root Directory is packages/senseai-viewer.
+# With no Root Directory set, the repo-root railway.json and Dockerfile build the same app.
 # Variables are documented in .env.example; none are required for the demo.
 
 [build]

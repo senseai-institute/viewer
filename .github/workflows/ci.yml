@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t senseai-viewer .
+        run: docker build -f Dockerfile.v0 -t senseai-viewer .
       - name: Refuses to start without a password in production
         run: |
           if docker run --rm -e RAILWAY_ENVIRONMENT=ci -e S3_BUCKET=b senseai-viewer; then
@@ -96,7 +96,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t senseai-viewer-v2 packages/senseai-viewer
+        run: |
+          docker build -t senseai-viewer-v2 .
+          docker build -t senseai-viewer-v2-pkg packages/senseai-viewer
       - name: Serves the demo share link with no variables
         run: |
           docker run -d --name v2 -p 8000:8000 senseai-viewer-v2

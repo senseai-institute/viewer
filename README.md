@@ -80,6 +80,11 @@ that changes the version, re-export.
 
 ## Deploy on Railway
 
+> **The repo root now deploys the v2 viewer** (`packages/senseai-viewer`): Replay, Compare
+> and Incidents, with no variables needed. See its README. The v0.1 viewer described below
+> still builds with `docker build -f Dockerfile.v0 .`. To deploy v0.1 on Railway, set the
+> service's Dockerfile path to `Dockerfile.v0` and its health check to `/healthz`.
+
 1. **Connect the repo.** In Railway, choose *New Project → Deploy from GitHub repo* and pick this
    repository. Railway builds the `Dockerfile`. `railway.json` sets the health check to
    `/healthz`.

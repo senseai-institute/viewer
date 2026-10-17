@@ -374,13 +374,13 @@ Nothing needs configuring for the demo: with no runs in `DATA_DIR`, the server b
 synthetic run on first start (about 2 s) and serves it.
 
 1. In Railway, choose **New Project → Deploy from GitHub repo** and pick this repository.
-2. In the service's **Settings → Source**, set **Root Directory** to `packages/senseai-viewer`.
-   Under **Config-as-code**, set the path to `/packages/senseai-viewer/railway.toml`. Without
-   it, Railway may pick up the v0.1 `railway.json` at the repo root, whose health check
-   (`/healthz`) this app also answers, so the deploy still goes green.
-3. Deploy. Railway builds the multi-stage `Dockerfile` (Node builds `web/`, then a slim Python
-   3.12 runtime). The build has no compiled dependencies and takes a few minutes; the health
-   check is `/api/health`.
+   Leave **Root Directory** empty. The repo-root `Dockerfile` and `railway.json` build this
+   viewer. If Root Directory is set to `packages/senseai-viewer`, that works too: it uses
+   this directory's `Dockerfile` and `railway.toml`.
+2. Variables left over from v0.1 (`VIEWER_PASSWORD`, `S3_*`, `AWS_*`) are ignored, so you
+   can delete them.
+3. Deploy. The build has no compiled dependencies and takes a few minutes; the health check
+   is `/api/health`.
 4. Under **Settings → Networking**, choose **Generate Domain**.
 5. Open `https://<domain>/s/demo`. That is the demo link.
 
