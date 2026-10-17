@@ -68,6 +68,9 @@ PERSON_Y0 = 1.6  # behind the rack edge, left of the path
 PERSON_STEP_T = 5.8  # starts walking into the aisle
 PERSON_SPEED = 1.0  # m/s along -y
 PERSON_STOP_Y = -1.6
+WINDOW_PRE_S = 3.0  # bench fire attribution window, from gate1_person_steps_out
+WINDOW_POST_S = 5.0
+CAMERA_HEIGHT_M = 0.9
 CLEAN_UNTIL_S = 5.0  # [0, 5) s has no actor anywhere near the path
 FLICKER_T = 3.1  # a sodium lamp flickers: frame-head surprise burst
 
@@ -101,6 +104,11 @@ PIPELINES = (
     PipelineSpec("panther", "panther", 0, 1.5, 0.6, 0.0, 0.05, 9.4, 11.2),
     PipelineSpec("null", "null", 0, 1.0, 0.6, 0.36, 1.0, 8.9, 10.6),
 )
+
+
+def _camera_attrs() -> dict[str, float]:
+    """Forward pinhole camera in the body frame, so the viewer can project the ground grid."""
+    return {"fx": FOCAL_PX, "cx": EV_W / 2, "cy": EV_H / 2, "mount_height_m": CAMERA_HEIGHT_M}
 
 
 def _t_s() -> NDArray[np.float64]:
@@ -226,8 +234,8 @@ def _surprise(
         int
     )
     for k in range(N_TICKS):
-        g = rng.gamma(1.2, 0.012, size=(GRID, GRID))
-        mass = (spec.event_gain * 3.4 + spec.frame_gain * 1.0) * ev[k]
+        g = rng.gamma(1.2, 0.006, size=(GRID, GRID))
+        mass = (spec.event_gain * 4.6 + spec.frame_gain * 1.0) * ev[k]
         if mass > 0:
             blob = np.exp(-((cx - xb[k]) ** 2 + (cy - yb[k]) ** 2) / (2 * 0.35**2))
             g += mass * blob / blob.sum()
@@ -300,7 +308,7 @@ def _reflex(
             lat_ms = float(latency_e2e_ns[k]) / 1e6
             explain = (
                 f"slowed to {scale[k] * 100:.0f}% at {t[k]:.2f} s: "
-                f"path risk {r:.1f} > {RISK_THRESHOLD:.1f} from {len(cells)} cells "
+                f"path risk {r:.2f} > {RISK_THRESHOLD:.1f} from {len(cells)} cells "
                 f"{_side(float(np.mean(ys)))}, heads event {shares['event'] * 100:.0f}% / "
                 f"frame {shares['frame'] * 100:.0f}%, profile {spec.profile} "
                 f"v{spec.profile_version}, latency {lat_ms:.1f} ms"
@@ -541,14 +549,17 @@ def build(path: str | Path, seed: int = 7) -> Path:
         rec = f.create_group("recording")
         ex, ey, et, ep, off = _events(rng)
         evg = rec.create_group("sources/events_front")
-        evg.attrs.update({"modality": "event", "width": EV_W, "height": EV_H})
+        evg.attrs.update({"modality": "event", "width": EV_W, "height": EV_H, **_camera_attrs()})
         for name, arr in (("x", ex), ("y", ey), ("t_ns", et), ("p", ep)):
             evg.create_dataset(name, data=arr, chunks=(min(len(arr), 65536),), **gz)
         evg.create_dataset("tick_offsets", data=off)
 
         frames, ft, fk = _frames(rng)
         frg = rec.create_group("sources/rgb_front")
-        frg.attrs.update({"modality": "frame", "width": FR_W, "height": FR_H, "encoding": "mono8"})
+        frg.attrs.update(
+            {"modality": "frame", "width": FR_W, "height": FR_H, "encoding": "mono8"}
+            | _camera_attrs()
+        )
         frg.create_dataset("data", data=frames, chunks=(1, FR_H, FR_W), **gz)
         frg.create_dataset("t_ns", data=ft)
         frg.create_dataset("tick", data=fk)
@@ -565,6 +576,8 @@ def build(path: str | Path, seed: int = 7) -> Path:
                 "t_visible_ns": T0_NS + round(gt["t_visible_s"] * 1e9),
                 "corridor_margin_m": CORRIDOR_MARGIN,
                 "lookahead_s": LOOKAHEAD_S,
+                "window_pre_s": WINDOW_PRE_S,
+                "window_post_s": WINDOW_POST_S,
             }
         )
         gtg.create_dataset(

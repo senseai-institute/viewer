@@ -60,3 +60,47 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/)" = 401
           test "$(curl -s -u u:pw -o /dev/null -w '%{http_code}' localhost:8000/)" = 200
           docker rm -f viewer
+
+  viewer-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/senseai-viewer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/senseai-viewer/web/package-lock.json
+      - name: Install
+        run: |
+          uv sync --extra dev
+          cd web && npm ci
+      - name: Install Chromium for Playwright
+        run: uv run playwright install --with-deps chromium
+      - run: make lint
+      - run: make type
+      - run: make test
+      - name: Validate the sample run
+        run: uv run senseai-viewer sample /tmp/demo.h5 && uv run senseai-viewer validate /tmp/demo.h5
+
+  viewer-v2-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t senseai-viewer-v2 packages/senseai-viewer
+      - name: Serves the demo share link with no variables
+        run: |
+          docker run -d --name v2 -p 8000:8000 senseai-viewer-v2
+          for i in $(seq 1 60); do curl -fsS localhost:8000/api/health && break; sleep 1; done
+          curl -fsS localhost:8000/api/runs | grep -q synthetic-panther-vs-null-s7
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/s/demo)" = 200
+          docker rm -f v2

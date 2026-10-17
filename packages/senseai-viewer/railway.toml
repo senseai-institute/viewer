@@ -1,0 +1,17 @@
+# Copyright 2026 SenseAI Institute
+# SPDX-License-Identifier: Apache-2.0
+#
+# Railway service config for senseai-viewer. In the service settings set
+#   Root Directory      = packages/senseai-viewer
+#   Config-as-code path = /packages/senseai-viewer/railway.toml
+# Variables are documented in .env.example; none are required for the demo.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

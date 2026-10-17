@@ -11,12 +11,15 @@ writes those formats shows up in the viewer exactly like SenseAI's own.
 
 Licence: Apache-2.0. Copyright 2026 SenseAI Institute.
 
-> **Status: design draft, step 1.** Only this README and
-> [`server/senseai_viewer/sample_data.py`](server/senseai_viewer/sample_data.py) exist so far.
-> Both are up for review before any implementation starts. Everything below describes the
-> intended behaviour, and the [window API](#the-window-api) and the
-> [RunLog layout](#runlog-layout-v0-what-the-viewer-reads) are the contract the code will be
-> tested against. [Open questions](#open-questions-for-review) lists what needs a decision.
+> **Status: first deployable slice.** Replay, Compare and Incidents work end to end on the
+> synthetic Panther-vs-default run, and `senseai-viewer validate` checks any RunLog. There is no
+> database, login, live endpoint, bench, library or profiles page yet:
+> [What this build does and does not do](#what-this-build-does-and-does-not-do) lists exactly
+> what is in and what is planned. The [window API](#the-window-api) and the
+> [RunLog layout](#runlog-layout-v0-what-the-viewer-reads) are implemented as written.
+
+![Replay page on the synthetic run at 6.40 s: camera view with projected surprise, body-frame map, senses, head-to-head tiles, explain, timeline](docs/screenshot-replay.png)
+<sub>The Replay page at 1400 × 1000, written by the Playwright smoke test (`make test`).</sub>
 
 ---
 
@@ -68,9 +71,9 @@ The layout follows the Panther replay mockup:
 │  32×32 surprise grid, ±5 m, teal → amber → red            │  frame ██░░░░░░░░  2.3   │
 │  bearing ring (72 bins), reflex path cells outlined       ├──────────────────────────┤
 │  cortex tracks: labelled dots with velocity vectors       │ Head to head             │
-│  HUD: t · profile · tokens/tick · lux                     │  first fire  6.29 | 6.63 │
-│                                                           │  lead time   +0.34 s     │
-│                                                           │  cells lit   45 | 21     │
+│  HUD: t · profile · tokens/tick · lux                     │  first fire  6.32 | 6.68 │
+│                                                           │  lead time   +0.36 s     │
+│                                                           │  cells lit   16 | 0      │
 │                                                           │  false fires 0 | 1       │
 │                                                           │  e2e p99     11.2 | 10.8 │
 ├───────────────────────────────────────────────────────────┴──────────────────────────┤
@@ -81,7 +84,7 @@ The layout follows the Panther replay mockup:
 ```
 
 The numbers above are those of the [synthetic sample run](#the-sample-run), with cells lit
-counted at Panther's first fire (6.29 s).
+counted at Panther's first fire (6.32 s).
 
 ### Keyboard
 
@@ -204,7 +207,7 @@ This is the whole-run overview the timeline and incident list are drawn from. It
     "risk_max": {"panther": [...], "null": [...]},
     "threshold": {"panther": 2.6, "null": 2.6}
   },
-  "fires":  [{"pipeline": "panther", "tick": 628, "t_s": 6.29, "action": "slow", "explain": "slowed to 40% at 6.29 s: ..."}, ...],
+  "fires":  [{"pipeline": "panther", "tick": 631, "t_s": 6.32, "action": "slow", "explain": "slowed to 40% at 6.32 s: ..."}, ...],
   "events": [{"pipeline": "panther", "tick": 620, "t_s": 6.21, "kind": "track.new", "text": "..."}, ...]
 }
 ```
@@ -283,12 +286,22 @@ Changes to this API need review. Additive changes keep `window_version`; anythin
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/health` | Liveness, DB and storage reachability (Railway health check). |
-| `POST /api/runs` (multipart, chunked), `GET /api/runs`, `GET/DELETE /api/runs/{id}` | Upload, list, metadata, delete. Upload validates the log and builds the index. |
-| `GET /api/compare?a={run}[:{pipeline}]&b=...` | Aligned clock and head-to-head stats. |
-| `GET /api/runs/{id}/incidents`, `GET /api/runs/{id}/incidents/{n}/export` | Fire and event index; ±2 s JSON bundle for a safety report. |
+Implemented:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health` (also `/healthz`) | Liveness and run count (Railway health check). |
+| `GET /api/runs`, `GET /api/runs/{id}` | List runs; one run's index. |
+| `PUT /api/runs` (raw body, `Authorization: Bearer $UPLOAD_TOKEN`), `DELETE /api/runs/{id}` | Upload a RunLog (validated, indexed, then served) or delete one. Disabled unless `UPLOAD_TOKEN` is set. |
+| `GET /api/compare?a={run}[:{pipeline}]&b=...[&at=t]` | Aligned clock and head-to-head stats. |
+| `GET /api/runs/{id}/incidents`, `GET /api/runs/{id}/incidents/export?t=&pipeline=&half=2` | Fire and event list; the ±2 s JSON bundle for a safety report. |
+
+Planned (need the database, auth or upstream contracts):
+
+| Endpoint | Purpose |
+|---|---|
 | `GET/POST/DELETE /api/runs/{id}/annotations` | Annotations (`editor`). |
-| `POST /api/runs/{id}/share`, `DELETE /api/share/{token}`, `GET /s/{token}` | Share links. |
+| `POST /api/runs/{id}/share`, `DELETE /api/share/{token}`, `GET /s/{token}` | Revocable share tokens. Today `/s/{run_id}` is a read-only view of the run. |
 | `POST /api/endpoints`, `WS /api/live/{endpoint_id}` (viewer), `WS /api/ingest/{endpoint_id}` (robot, bearer token) | Live telemetry fan-out. |
 | `GET /api/bench/reports/...`, `POST /api/bench/verify` | Bench reports and leaderboard hash check. |
 | `GET /api/library`, `GET /api/library/{clade}` | Species library, public. |
@@ -329,10 +342,12 @@ default).
   it back.
 - **What the tiles show.**
   - Ground truth: the person becomes visible at 5.90 s and enters the path at 6.51 s.
-  - First fire: Panther at 6.29 s (`d = −0.22 s`) and the default at 6.63 s (`d = +0.12 s`),
-    so Panther leads by 0.34 s.
-  - Cells lit at 6.29 s: Panther 45, the default 21.
-  - False fires: Panther 0, the default 1 (at 2.99 s), caused by a lamp flicker around 3 s.
+  - First fire: Panther at 6.32 s (`d = −0.19 s`) and the default at 6.68 s (`d = +0.17 s`),
+    so Panther leads by 0.36 s.
+  - Cells lit at 6.32 s: Panther 16, the default 0 (it has not picked the person up yet).
+  - False fires: Panther 0, the default 1 (at 3.01 s), caused by a lamp flicker around 3 s.
+  - Throughput (mean speed scale while moving): Panther 74 %, the default 77 %. Panther
+    brakes earlier and longer, which costs a little speed.
   - Latency e2e p99: about 11.2 ms for Panther and 10.8 ms for the default.
 
 These numbers are **illustrative, not measured**. The file's `synthetic` attribute is true, and
@@ -341,28 +356,47 @@ the UI shows a "synthetic data" badge on every page that displays it. Real numbe
 
 ---
 
-## Run it locally *(planned)*
+## Run it locally
 
 ```bash
-uv sync --extra dev && (cd web && npm ci)
-uv run python examples/demo_run.py --local      # builds the sample run, imports it, prints a URL
-uv run senseai-viewer serve                      # http://127.0.0.1:8000, SQLite + ./data volume
+make install                 # uv sync --extra dev, npm ci
+make serve                   # builds web/, then http://127.0.0.1:8000 (builds the demo run on first start)
+open http://127.0.0.1:8000/s/demo
 ```
 
-## Deploy on Railway *(planned)*
+`make test lint type` runs pytest (with the Playwright smoke test), ruff, mypy `--strict`, the
+TypeScript check and the web unit tests. For frontend work, run `npm run dev` in `web/`; it
+proxies `/api` to port 8000.
 
-1. Create a project from this repo and set the service root to `packages/senseai-viewer`.
-   Railway builds the multi-stage `Dockerfile` (Node builds `web/`, then a slim Python runtime).
-2. Add the Railway Postgres plugin. `DATABASE_URL` is injected, and Alembic migrations run
-   on start.
-3. Attach storage for log files: either a Railway volume mounted at `/data`, or an
-   S3-compatible bucket. See the open question below.
-4. Set `PUBLIC_BASE_URL`, `SESSION_SECRET`, `AUTH_*` and `MAX_UPLOAD_MB`, documented in
-   `.env.example`.
-5. Run `railway up`, then `python examples/demo_run.py --url $PUBLIC_BASE_URL`, which uploads
-   the sample run and prints its public share link.
+## Deploy on Railway
 
-The health check is `/api/health`, configured in `railway.toml`.
+Nothing needs configuring for the demo: with no runs in `DATA_DIR`, the server builds the
+synthetic run on first start (about 2 s) and serves it.
+
+1. In Railway, choose **New Project → Deploy from GitHub repo** and pick this repository.
+2. In the service's **Settings → Source**, set **Root Directory** to `packages/senseai-viewer`.
+   Under **Config-as-code**, set the path to `/packages/senseai-viewer/railway.toml`. Without
+   it, Railway may pick up the v0.1 `railway.json` at the repo root, whose health check
+   (`/healthz`) this app also answers, so the deploy still goes green.
+3. Deploy. Railway builds the multi-stage `Dockerfile` (Node builds `web/`, then a slim Python
+   3.12 runtime). The build has no compiled dependencies and takes a few minutes; the health
+   check is `/api/health`.
+4. Under **Settings → Networking**, choose **Generate Domain**.
+5. Open `https://<domain>/s/demo`. That is the demo link.
+
+Optional:
+
+- **Uploads.** Set `UPLOAD_TOKEN`, then
+  `uv run python examples/demo_run.py --url https://<domain> --token $UPLOAD_TOKEN`, or
+  `curl -T run.h5 -H "Authorization: Bearer $UPLOAD_TOKEN" https://<domain>/api/runs`.
+- **Keeping uploads across deploys.** Attach a volume mounted at `/data`. Railway mounts
+  volumes as root and the image runs as an unprivileged user, so also set
+  `RAILWAY_RUN_UID=0`. Without that the server logs a warning and keeps runs in a temporary
+  directory, which is lost on redeploy.
+- All variables are listed in [`.env.example`](.env.example).
+
+On the smallest plan the server uses about 70 MB of memory while serving the demo. An
+uncached 2 s window with every layer takes about 140 ms to build, and a cached one about 60 ms.
 
 ## Interoperability guarantee
 
@@ -377,7 +411,9 @@ The health check is `/api/health`, configured in `railway.toml`.
 ## Privacy
 
 - **Share links** expose one run read-only: its recording, pipelines and annotations, but not
-  other runs, users or endpoints. They are rate-limited, revocable, and can expire.
+  other runs, users or endpoints. They are rate-limited, revocable, and can expire. *Today*
+  every run on a server is public at `/s/{run_id}`, so do not upload anything private until
+  the auth step lands.
 - **Raw frames** from a live endpoint are off unless the endpoint opted in
   (`telemetry.raw_frames: true` in its SDK config), and the Live page shows a "raw frames off"
   indicator when they are off.
@@ -385,6 +421,45 @@ The health check is `/api/health`, configured in `railway.toml`.
   (`--no-frames`), which keeps events, surprise, reflex and cortex.
 
 ---
+
+## What this build does and does not do
+
+Built so far, with no new dependencies (server: FastAPI, uvicorn, h5py, numpy; web: no runtime
+packages at all):
+
+- **Replay**, **Compare** (same run or two runs aligned on ground truth, with swap and diff),
+  **Incidents** (filters, ±2 s looping detail, JSON export) and a **runs list**. Every state is
+  in the URL, and `/s/{run}` is the read-only share view (`/s/demo` is the first synthetic run).
+- `readers/runlog.py` (lazy, sliced by tick), `readers/window.py`, `index.py` (precomputed
+  once per file and cached beside it), `stats.py`, `validate.py`, and a CLI with `serve`,
+  `sample`, `validate` and `index`.
+- Tests: 40 pytest tests at 95 % server coverage, including bench's own false-stop vectors, a
+  hand-written third-party RunLog, and a Playwright smoke test that also writes the
+  screenshot above. There are 7 web unit tests.
+
+Choices made to avoid adding dependencies. Each can be revisited:
+
+- **msgpack** is a 150-line encoder in `wire.py` and a decoder in `web/src/api/msgpack.ts`,
+  not the `msgpack` package. The wire format is standard msgpack.
+- **Frames** travel as raw `mono8` (`frames.encoding = "mono8"`), box-filtered to `frame_w`,
+  instead of JPEG, because JPEG would need Pillow. The client asks for at most 10 frames per
+  2 s.
+- **Web**: plain TypeScript and canvas 2D (18 kB gzipped in total), not React and WebGL. The
+  scene holds 60 fps on the sample run.
+- **Storage**: run files sit in `DATA_DIR/runs`, with no Postgres. Each run's id is its
+  `run_id` attribute.
+
+Not built yet, in the planned order: Live (needs the SDK telemetry format), Bench reports
+(needs bench's RunLog and submission format), Library and Clade pages (the library YAML lives
+in the private `profiles` repo; publishing it here is your call), Profiles, auth with
+revocable share tokens and annotations (needs Postgres), and Fleet.
+
+Additions to layout v0 made while building, all optional and additive:
+
+- a source may carry camera intrinsics `fx`, `cx`, `cy` and `mount_height_m`, so the surprise
+  heat can be projected onto the camera view;
+- ground truth may carry `window_pre_s` and `window_post_s` (bench's attribution window;
+  the defaults are 3 s and 5 s).
 
 ## Open questions for review
 
@@ -398,23 +473,39 @@ The health check is `/api/health`, configured in `railway.toml`.
 2. **RunLog layout v0.** The bench, reflex and cortex contracts it stands in for are not
    written yet. It should be proposed to `senseai-bench` as its HDF5 layout, so that there is
    one layout rather than two.
-3. **Storage.** The choice is between a Railway volume (cheapest and simplest, but tied to one
-   service replica) and S3-compatible storage (needed for more than one replica, costs extra).
-   Per the working rules I will stop and ask before choosing.
-4. **Dependencies.** Server additions beyond the listed set are `msgpack` (window encoding)
-   and `alembic` (migrations), both small. For the web bundle I intend to use no charting
-   library over 1 MB: uPlot (about 50 kB) for the timeline and raw WebGL for the scene.
-5. **The mockup.** The Playwright layout check needs the mockup image (1400 × 1000). I don't
-   have it yet. Please add it to `docs/mockup.png`, or tell me where it is.
+3. **Storage.** For now runs are files in `DATA_DIR`: a Railway volume, or container disk
+   without one. The choice that remains is between a volume (cheapest and simplest, but tied
+   to one replica) and S3-compatible storage (needed for more than one replica, costs extra).
+   That choice is still yours.
+4. **Dependencies.** None were added. When the database and auth steps come, they will need
+   `sqlalchemy`, `asyncpg` and `itsdangerous` from your list, plus `alembic` for migrations.
+5. **The mockup.** The Playwright test checks the layout structurally: scene top-left, side
+   column right, timeline and transport below. To compare pixels against the mockup at
+   1400 × 1000, add it as `docs/mockup.png`.
 
 ## Layout
 
 ```
 packages/senseai-viewer/
-  README.md                         this file
+  README.md, Dockerfile, railway.toml, .env.example, Makefile, pyproject.toml, uv.lock
   server/senseai_viewer/
-    sample_data.py                  synthetic Panther-vs-default run (done)
-    app.py, settings.py, storage.py, stats.py, db/, readers/, api/   (next)
-  web/                              Vite + React + TypeScript (next)
-  tests/, examples/, Dockerfile, railway.toml, .env.example          (next)
+    app.py          FastAPI app: /api/*, the web app, demo run on first start
+    settings.py     environment variables
+    store.py        run files, cached indexes, window LRU
+    index.py        per-run overview (timeline, fires, events, head-to-head)
+    stats.py        every number on screen
+    wire.py         msgpack / JSON encoding of window bundles
+    validate.py     senseai-viewer validate
+    sample_data.py  the synthetic Panther-vs-default run
+    readers/        runlog.py (HDF5 accessors), window.py (window bundles)
+    cli.py
+  web/src/
+    main.ts         router
+    api/            typed client, msgpack decoder, 2 s chunk cache
+    panels/         scene, timeline, side panels (senses, tiles, explain, events), transport
+    pages/          runs, replay, compare, incidents
+    state/          playback clock, layers, URL state
+  tests/            pytest + Playwright smoke
+  examples/demo_run.py
+  docs/screenshot-replay.png
 ```
