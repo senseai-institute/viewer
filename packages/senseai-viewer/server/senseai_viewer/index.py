@@ -18,10 +18,11 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from senseai_viewer import stats
+from senseai_viewer import arms, stats
 from senseai_viewer.readers.runlog import RunLog
 
 INDEX_VERSION = 1
+_CACHE_REV = 2  # bump when the index gains fields, so cached files are rebuilt
 MAX_BUCKETS = 4000
 
 
@@ -139,6 +140,9 @@ def build_index(log: RunLog) -> dict[str, Any]:
                 "profile_version": p.profile_version,
                 "heads": p.heads,
                 "layers": p.layers,
+                "kind": p.kind,
+                "label": arms.label(p.name),
+                "bearing_p99": _bearing_p99(log, p.name) if p.layers["bearing"] else None,
                 **log.grid_meta(p.name),
             }
             for p in pipes
@@ -150,6 +154,27 @@ def build_index(log: RunLog) -> dict[str, Any]:
         "events": events,
         "default_pair": list(pair) if pair else None,
         "head_to_head": h2h,
+        "video": _video_summary(log),
+        "video_pair": list(vp) if (vp := arms.default_pair([p.name for p in pipes])) else None,
+    }
+
+
+def _bearing_p99(log: RunLog, name: str) -> float:
+    """99th percentile of a pipeline's bearing ring: the full-scale value of the heat band."""
+    ring = log.series(name, "surprise/per_bearing").astype(np.float32)
+    return round(float(np.percentile(ring, 99)), 4) if ring.size else 0.0
+
+
+def _video_summary(log: RunLog) -> dict[str, Any] | None:
+    v = log.video()
+    if v is None:
+        return None
+    return {
+        "frames": len(v.t_ns),
+        "fps": v.fps,
+        "width": v.width,
+        "height": v.height,
+        "has_event": v.has_event,
     }
 
 
@@ -171,7 +196,7 @@ def _clean(obj: Any) -> Any:
 def load_or_build(path: Path) -> dict[str, Any]:
     """Return the cached index beside ``path`` if it is current, else build and cache it."""
     st = path.stat()
-    key = f"{st.st_size}:{st.st_mtime_ns}:{INDEX_VERSION}"
+    key = f"{st.st_size}:{st.st_mtime_ns}:{INDEX_VERSION}:{_CACHE_REV}"
     cache = path.with_suffix(path.suffix + ".index.json")
     if cache.exists():
         try:

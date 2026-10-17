@@ -132,6 +132,11 @@ def validate(path: str | Path) -> Report:
             "head to head": "on" if len(pipes) >= 2 else "compare page only (one pipeline)",
             "lead time": "on" if "t_gt_s" in log.ground_truth() else "off: no ground_truth t_gt_ns",
             "latency": "on" if any_layer("latency") else "off: no latency/e2e",
+            "video": "on" if log.video() is not None else "off: no /recording/video",
+            "gt boxes": "on"
+            if log.gt_boxes() is not None
+            else "off: no /recording/ground_truth/boxes",
+            "detector boxes": "on" if any_layer("boxes") else "off: no /pipelines/<arm>/boxes",
         }
         for k, v in r.panels.items():
             if v.startswith("off"):

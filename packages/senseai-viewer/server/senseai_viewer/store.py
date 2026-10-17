@@ -137,6 +137,19 @@ class Store:
         self.index(run_id)
         return run_id
 
+    def link(self, src: Path, name: str) -> str:
+        """Serve a RunLog written elsewhere (a runner run) by linking it into the store."""
+        with RunLog(src) as log:
+            run_id = log.run_id
+        if not RUN_ID.match(run_id):
+            raise RunLogError(f"run_id {run_id!r} must match {RUN_ID.pattern}")
+        dest = self.runs_dir / f"{name}.h5"
+        dest.unlink(missing_ok=True)
+        dest.symlink_to(src.resolve())
+        self.rescan()
+        self.index(run_id)
+        return run_id
+
     def delete(self, run_id: str) -> None:
         """Remove a run and its cached index."""
         p = self.path(run_id)
