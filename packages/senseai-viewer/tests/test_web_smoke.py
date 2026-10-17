@@ -56,6 +56,40 @@ def server(tmp_path_factory: pytest.TempPathFactory, sample_run: Path) -> Iterat
     th.join(5)
 
 
+def test_simple_view(server: str) -> None:
+    with pw.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as e:  # pragma: no cover - no browser in this environment
+            pytest.skip(f"chromium unavailable: {e}")
+        page = browser.new_page(viewport={"width": 1400, "height": 1000})
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server}/s/demo?t=6.45")
+        page.wait_for_selector(".story-pane canvas")
+        assert "0.36 s sooner" in page.locator("h1").inner_text()
+        assert page.locator(".story-pane-title").all_inner_texts() == [
+            "With Panther",
+            "Standard robot",
+        ]
+        page.wait_for_function(
+            "() => document.querySelector('.story-status')?.textContent === 'Slowing down'"
+        )
+        assert page.locator(".story-status").nth(1).inner_text() == "Driving normally"
+        assert page.locator(".story-caption").inner_text() == "Panther slows down"
+        assert page.locator(".story-moments li").count() == 5
+        page.wait_for_timeout(300)
+        DOCS.mkdir(exist_ok=True)
+        page.screenshot(path=str(DOCS / "screenshot-simple.png"))
+        page.goto(f"{server}/")  # the root opens the simple view of the demo run and plays
+        page.wait_for_selector(".story-pane canvas")
+        page.wait_for_function(
+            "() => document.querySelector('.story-play')?.textContent?.includes('Pause')"
+        )
+        assert not errors, errors
+        browser.close()
+
+
 def test_replay_smoke(server: str) -> None:
     with pw.sync_playwright() as p:
         try:
@@ -65,7 +99,7 @@ def test_replay_smoke(server: str) -> None:
         page = browser.new_page(viewport={"width": 1400, "height": 1000})
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{server}/s/demo?t=5.00")
+        page.goto(f"{server}/replay/demo?t=5.00")
         page.wait_for_selector(".scene canvas")
         page.wait_for_function(
             "() => !document.querySelector('.transport .muted.grow')?.textContent"
@@ -97,7 +131,7 @@ def test_replay_smoke(server: str) -> None:
         assert float(page.url.split("t=")[1].split("&")[0]) > 11.0 or "t=" in page.url
 
         # Back to the start of the clean segment, then jump to the next fire with "]".
-        page.goto(f"{server}/s/demo?t=6.00")
+        page.goto(f"{server}/replay/demo?t=6.00")
         page.wait_for_selector(".scene canvas")
         page.keyboard.press("]")
         page.wait_for_function(
@@ -114,7 +148,7 @@ def test_replay_smoke(server: str) -> None:
         page.wait_for_timeout(300)
         assert "p=panther" in page.url
 
-        page.goto(f"{server}/s/demo?t=6.40")
+        page.goto(f"{server}/replay/demo?t=6.40")
         page.wait_for_selector(".scene canvas")
         page.wait_for_function(
             "() => !document.querySelector('.transport .muted.grow')?.textContent"
@@ -129,7 +163,7 @@ def test_replay_smoke(server: str) -> None:
         page.goto(f"{server}/incidents/demo")
         page.wait_for_selector("table.grid tr.row")
         assert page.locator("table.grid tr.row").count() == 5
-        page.goto(f"{server}/")
+        page.goto(f"{server}/runs")
         page.wait_for_selector(".card")
         assert not errors, errors
         browser.close()

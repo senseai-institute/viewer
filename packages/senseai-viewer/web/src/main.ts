@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Router. Plain links and full page loads; every page keeps its state in the URL.
-//   /                      runs
-//   /replay/{run}          replay          /s/{run}  read-only share of the same page
+//   /                      the simple view of the demo run (first synthetic run)
+//   /s/{run}, /story/{run} the simple view: one story in plain words (the share link)
+//   /runs                  all runs
+//   /replay/{run}          the detailed view
 //   /compare/{run}         compare the run's default pair; /compare?a=run:pipe&b=run:pipe
 //   /incidents/{run}       incidents
 // "demo" as {run} means the first synthetic run on the server.
@@ -15,6 +17,7 @@ import { comparePage } from "./pages/compare.ts";
 import { incidentsPage } from "./pages/incidents.ts";
 import { replayPage } from "./pages/replay.ts";
 import { runsPage } from "./pages/runs.ts";
+import { storyPage } from "./pages/story.ts";
 
 async function resolve(run: string): Promise<string> {
   if (run !== "demo") return run;
@@ -27,8 +30,10 @@ async function resolve(run: string): Promise<string> {
 async function route(root: HTMLElement): Promise<void> {
   const parts = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const [page, arg] = parts;
-  if (!page) return runsPage(root);
-  if ((page === "replay" || page === "s") && arg) return replayPage(root, await resolve(arg), page === "s");
+  if (!page) return storyPage(root, await resolve("demo"));
+  if ((page === "s" || page === "story") && arg) return storyPage(root, await resolve(arg));
+  if (page === "runs") return runsPage(root);
+  if (page === "replay" && arg) return replayPage(root, await resolve(arg), false);
   if (page === "compare") return comparePage(root, arg ? await resolve(arg) : null);
   if (page === "incidents" && arg) return incidentsPage(root, await resolve(arg));
   root.replaceChildren(el("main", "loading", "Page not found. "));

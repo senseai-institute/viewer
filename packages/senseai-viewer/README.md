@@ -18,6 +18,14 @@ Licence: Apache-2.0. Copyright 2026 SenseAI Institute.
 > what is in and what is planned. The [window API](#the-window-api) and the
 > [RunLog layout](#runlog-layout-v0-what-the-viewer-reads) are implemented as written.
 
+**Two views.** The **simple view** is what opens at `/` and at share links `/s/{run}`. It
+tells one story in plain words: two camera views side by side ("With Panther" and "Standard
+robot"), a big status under each ("Driving normally", "Slowing down", "Braking"), one
+sentence about what is happening, the key moments, and three results. The **detailed view**
+(`/replay/{run}`) is everything described below, for engineers and safety reviewers.
+
+![Simple view at 6.45 s: Panther is slowing down, the standard robot is still driving normally](docs/screenshot-simple.png)
+
 ![Replay page on the synthetic run at 6.40 s: camera view with projected surprise, body-frame map, senses, head-to-head tiles, explain, timeline](docs/screenshot-replay.png)
 <sub>The Replay page at 1400 × 1000, written by the Playwright smoke test (`make test`).</sub>
 
@@ -382,7 +390,7 @@ synthetic run on first start (about 2 s) and serves it.
 3. Deploy. The build has no compiled dependencies and takes a few minutes; the health check
    is `/api/health`.
 4. Under **Settings → Networking**, choose **Generate Domain**.
-5. Open `https://<domain>/s/demo`. That is the demo link.
+5. Open `https://<domain>/`. It plays the demo in the simple view; `/s/demo` is the same page.
 
 Optional:
 
