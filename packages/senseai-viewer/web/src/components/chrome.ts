@@ -14,9 +14,12 @@ export interface ChromeOpts {
   run?: string;
   title?: string;
   synthetic?: boolean;
-  current: "runs" | "replay" | "compare" | "incidents" | "story";
+  current: "runs" | "replay" | "compare" | "incidents" | "story" | "run";
   share?: boolean; // read-only share view: no navigation to other runs
 }
+
+/** Set once at start-up from /api/runner/options: whether to show the Run link. */
+export const features = { runner: false };
 
 export function topbar(o: ChromeOpts): HTMLElement {
   const bar = el("header", "topbar");
@@ -41,6 +44,7 @@ export function topbar(o: ChromeOpts): HTMLElement {
       link("incidents", "Incidents", `/incidents/${r}`);
     }
     link("runs", "All runs", "/runs");
+    if (features.runner) link("run", "Run", "/run");
     bar.append(nav);
   }
   bar.append(el("span", "title", o.title ?? ""));

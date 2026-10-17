@@ -167,3 +167,122 @@ def test_replay_smoke(server: str) -> None:
         page.wait_for_selector(".card")
         assert not errors, errors
         browser.close()
+
+
+@pytest.fixture(scope="module")
+def runner_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """A real server with the runner on, a DSEC-like folder and the fake bench producer."""
+    import os
+    import sys
+
+    from .test_runner import FAKE, make_dsec
+
+    if not (STATIC / "index.html").exists():
+        pytest.skip("web app not built (make build)")
+    tmp = tmp_path_factory.mktemp("live")
+    dsec = make_dsec(tmp / "dsec")
+    old = {k: os.environ.get(k) for k in ("FAKE_BENCH_DELAY",)}
+    os.environ["FAKE_BENCH_DELAY"] = "0.05"
+    app = create_app(
+        Settings(
+            data_dir=tmp / "data",
+            upload_token=None,
+            max_upload_mb=1,
+            public_base_url=None,
+            demo=False,
+            cache_mb=16,
+            runner=True,
+            data_root=dsec,
+            bench_cmd=f"{sys.executable} {FAKE}",
+            bench_python=sys.executable,
+        )
+    )
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    th = threading.Thread(target=srv.run, daemon=True)
+    th.start()
+    for _ in range(100):
+        if srv.started:
+            break
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    srv.should_exit = True
+    th.join(5)
+    for k, v in old.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+def test_run_page_and_side_by_side(runner_server: str) -> None:
+    with pw.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as e:  # pragma: no cover - no browser in this environment
+            pytest.skip(f"chromium unavailable: {e}")
+        page = browser.new_page(viewport={"width": 1400, "height": 1000})
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{runner_server}/")  # the runner is on, so the root opens the Run page
+        page.wait_for_selector(".pick")
+        page.wait_for_function("() => !document.body.innerText.includes('measuring brightness')")
+        names = page.locator("#app .pick-title").all_inner_texts()
+        assert names[0].startswith("zurich_city_09_a")  # darkest first
+        assert "NIGHT" in names[0].upper() and "LABELS" in names[0].upper()
+        assert page.get_by_text("Panther (no training)").count() >= 1
+        assert page.get_by_role("link", name="Run", exact=True).count() == 1
+        page.click(".run-btn")
+        page.wait_for_selector(".arm-card")
+        page.wait_for_function(
+            "() => /· ([3-9]\\d)%/.test(document.querySelector('.run-status')?.textContent ?? '')"
+        )
+        DOCS.mkdir(exist_ok=True)
+        page.locator(".run-live").screenshot(path=str(DOCS / "screenshot-run-live.png"))
+        page.wait_for_selector(".run-watch a", timeout=60_000)
+        assert "reacted" in page.locator(".run-headline").inner_text()
+        assert page.locator("table.results tbody tr").count() == 1
+        page.locator(".run-live").screenshot(path=str(DOCS / "screenshot-run-done.png"))
+        assert page.locator(".run-history .run-row").count() == 1
+
+        page.click(".run-watch a")
+        page.wait_for_selector(".vpane canvas")
+        assert page.locator(".vpane").count() == 2
+        assert page.locator(".vpane-title").all_inner_texts() == [
+            "Panther (no training)",
+            "Standard camera AI (torchvision)",
+        ]
+        assert "Panther (no training) reacted" in page.locator("h1").inner_text()
+        assert page.locator(".vobjects li").count() == 1
+        page.locator(
+            ".vobjects li button"
+        ).click()  # jump to just before the pedestrian enters the path
+        page.wait_for_timeout(300)
+        before = page.locator(".story-time").inner_text()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_timeout(200)
+        assert page.locator(".story-time").inner_text() != before
+        heat = page.get_by_role("button", name="Panther heat (key 3)")
+        assert heat.get_attribute("aria-pressed") == "true"
+        page.keyboard.press("3")
+        page.wait_for_timeout(150)
+        assert heat.get_attribute("aria-pressed") == "false"
+        page.keyboard.press("3")
+        page.goto(page.url.split("?")[0] + "?t=3.30")
+        page.wait_for_selector(".vpane canvas")
+        for _ in range(100):
+            pills = page.locator(".story-status").all_inner_texts()
+            if pills and pills[0] != "Driving normally":
+                break
+            page.wait_for_timeout(100)
+        assert pills[0] in ("Slowing", "Braking"), (
+            pills,
+            page.locator(".story-time").inner_text(),
+            page.url,
+        )
+        page.wait_for_timeout(1200)
+        page.screenshot(path=str(DOCS / "screenshot-side-by-side.png"))
+        assert not errors, errors
+        browser.close()

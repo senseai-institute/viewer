@@ -43,6 +43,7 @@ class PipelineInfo:
     profile_version: int
     heads: list[str]
     layers: dict[str, bool]
+    kind: str = "reflex"  # "reflex" | "detector"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,20 @@ class Camera:
     cx: float
     cy: float
     mount_height_m: float
+
+
+@dataclass(frozen=True)
+class Video:
+    """The recording's footage (layout v0 extension ``/recording/video``)."""
+
+    t_ns: NDArray[np.int64]
+    fps: float
+    width: int
+    height: int
+    source: str
+    has_event: bool
+    fx: float | None
+    cx: float | None
 
 
 @dataclass
@@ -74,6 +89,16 @@ def _decode(v: object) -> object:
     if isinstance(v, np.generic):
         return v.item()
     return v
+
+
+def read_columns(obj: h5py.Group | h5py.Dataset) -> dict[str, NDArray[Any]]:
+    """Read a table stored as a group of equal-length columns or as a compound dataset."""
+    if isinstance(obj, h5py.Dataset):
+        arr = obj[()]
+        if arr.dtype.names is None:
+            raise RunLogError(f"{obj.name}: expected a compound dataset or a group of columns")
+        return {n: np.asarray(arr[n]) for n in arr.dtype.names}
+    return {k: np.asarray(v[()]) for k, v in obj.items() if isinstance(v, h5py.Dataset)}
 
 
 def _read_table(g: h5py.Group) -> Table:
@@ -184,7 +209,17 @@ class RunLog:
                 "reflex": "reflex/action" in pg,
                 "cortex": "cortex/events" in pg,
                 "latency": "latency/e2e" in pg,
+                "boxes": "boxes" in pg,
             }
+            kind = str(_decode(a.get("kind", "")))
+            if kind not in ("reflex", "detector"):
+                kind = "detector" if layers["boxes"] and not layers["surprise"] else "reflex"
+            if (
+                kind == "detector"
+            ):  # "detector arm: no surprise", even if zero-filled datasets exist
+                for k in ("surprise", "grid", "bearing", "heads"):
+                    layers[k] = False
+                heads = []
             out.append(
                 PipelineInfo(
                     name=name,
@@ -193,6 +228,7 @@ class RunLog:
                     profile_version=int(a.get("profile_version", 0)),
                     heads=heads,
                     layers=layers,
+                    kind=kind,
                 )
             )
         return out
@@ -361,6 +397,104 @@ class RunLog:
             r["t_s"] = self.ns_to_s(int(r["t_ns"]))
             r["t_ns"] = str(r["t_ns"])
         return rows
+
+    # ------------------------------------------------------------------ video and boxes
+
+    def _video_group(self) -> tuple[h5py.Group, h5py.File | None] | None:
+        g = self._group("recording/video")
+        if g is None:
+            return None
+        side = _decode(g.attrs.get("sidecar", ""))
+        if side:
+            f = h5py.File(self.path.parent / str(side), "r")
+            vg = f.get("recording/video") or f.get("video") or f
+            return vg, f
+        return g, None
+
+    def video(self) -> Video | None:
+        """Return the footage index (times and attributes), or ``None`` without video."""
+        found = self._video_group()
+        if found is None:
+            return None
+        g, f = found
+        try:
+            with _LOCK:
+                t_ns = np.asarray(g["t_ns"][()], dtype=np.int64)
+                a = dict(g.attrs)
+                has_event = "event_jpeg" in g
+        finally:
+            if f is not None:
+                f.close()
+        rec = self._group("recording/video")
+        if rec is not None:
+            a = {**dict(rec.attrs), **a}
+        fps = float(a.get("fps", 0) or 0)
+        if not fps and len(t_ns) > 1:
+            fps = 1e9 / float(np.median(np.diff(t_ns)))
+
+        def num(k: str) -> float | None:
+            return float(a[k]) if k in a else None
+
+        return Video(
+            t_ns=t_ns,
+            fps=round(fps, 3),
+            width=int(a.get("width", 0)),
+            height=int(a.get("height", 0)),
+            source=str(_decode(a.get("source", ""))),
+            has_event=has_event,
+            fx=num("fx"),
+            cx=num("cx"),
+        )
+
+    def video_frame(self, i: int, kind: str = "rgb") -> bytes:
+        """JPEG bytes of frame ``i`` (``kind`` "rgb" or "event"); ``KeyError`` if absent."""
+        found = self._video_group()
+        if found is None:
+            raise KeyError("video")
+        g, f = found
+        name = "jpeg" if kind == "rgb" else "event_jpeg"
+        try:
+            with _LOCK:
+                if name not in g:
+                    raise KeyError(name)
+                ds = g[name]
+                if not 0 <= i < ds.shape[0]:
+                    raise KeyError(i)
+                v = ds[i]
+        finally:
+            if f is not None:
+                f.close()
+        if isinstance(v, bytes):
+            return v
+        if isinstance(v, np.void):
+            return v.tobytes()
+        return np.asarray(v, dtype=np.uint8).tobytes()
+
+    def gt_boxes(self) -> dict[str, NDArray[Any]] | None:
+        """Ground-truth boxes ``t_ns, x, y, w, h, cls, track_id`` in video pixels."""
+        obj = self._f.get("recording/ground_truth/boxes")
+        if obj is None:
+            return None
+        with _LOCK:
+            return read_columns(obj)
+
+    def gt_tracks(self) -> dict[str, NDArray[Any]] | None:
+        """Per-track corridor entry ``track_id, cls, t_ns``, if the producer wrote it."""
+        obj = self._f.get("recording/ground_truth/tracks")
+        if obj is None:
+            return None
+        with _LOCK:
+            return read_columns(obj)
+
+    def boxes(self, name: str) -> tuple[dict[str, NDArray[Any]], dict[str, object]] | None:
+        """Return a detector arm's boxes (``t_ns, x, y, w, h, cls, score, in_corridor``)."""
+        obj = self._f.get(f"pipelines/{name}/boxes")
+        if obj is None:
+            return None
+        with _LOCK:
+            cols = read_columns(obj)
+            attrs = {k: _decode(v) for k, v in obj.attrs.items()}
+        return cols, attrs
 
     def latency_stages(self, name: str) -> list[str]:
         """Stage names under ``latency/`` other than ``e2e``."""
