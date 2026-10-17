@@ -17,7 +17,17 @@ from .conftest import write_minimal_runlog
 def test_validate_sample_lights_every_panel(sample_run: Path) -> None:
     r = validate(sample_run)
     assert r.ok, r.render()
-    assert set(r.panels.values()) == {"on"}
+    video_panels = {"video", "gt boxes", "detector boxes"}
+    assert {k for k, v in r.panels.items() if v != "on"} == video_panels  # no footage in this run
+    assert r.panels["video"] == "off: no /recording/video"
+
+
+def test_validate_video_run(tmp_path: Path) -> None:
+    from senseai_viewer import sample_video
+
+    r = validate(sample_video.build(tmp_path / "v.h5", seconds=4.0))
+    assert r.ok, r.render()
+    assert r.panels["video"] == r.panels["gt boxes"] == r.panels["detector boxes"] == "on"
 
 
 def test_validate_third_party_log(minimal_run: Path) -> None:

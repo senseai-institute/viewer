@@ -25,6 +25,7 @@ export class Player {
 
   on(fn: () => void): void {
     this.listeners.push(fn);
+    this.dirty = true; // a listener added after the first frame still gets drawn
   }
 
   clamp(t: number): number {

@@ -19,6 +19,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from senseai_viewer import __version__, sample_data, stats, wire
+from senseai_viewer.auth import BasicAuth
+from senseai_viewer.live import add_runner_routes, add_video_routes
 from senseai_viewer.readers.runlog import RunLog, RunLogError
 from senseai_viewer.readers.window import ALL_LAYERS, DEFAULT_LAYERS, WindowParams, build_window
 from senseai_viewer.settings import Settings
@@ -85,6 +87,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = Store(writable_data_dir(cfg.data_dir), cfg.cache_mb)
     app.state.settings = cfg
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+    if cfg.viewer_password:
+        app.add_middleware(BasicAuth, password=cfg.viewer_password)
 
     def store() -> Store:
         s: Store = app.state.store
@@ -336,6 +340,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         name = f"{run_id}-incident-{t:.2f}s.json"
         return _json(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    add_video_routes(app, get_log)
+    app.state.runner = add_runner_routes(app, cfg, store) if cfg.runner else None
+    if not cfg.runner:
+
+        @app.get("/api/runner/options")
+        def runner_off() -> dict[str, object]:
+            return {"enabled": False}
 
     # ------------------------------------------------------------------ web app
 

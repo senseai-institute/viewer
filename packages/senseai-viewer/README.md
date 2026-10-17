@@ -188,6 +188,30 @@ uses world's body frame: x forward, y left, metres, origin at the robot base.
 A pipeline may omit any group. The panels that need it then say "not available", and
 `senseai-viewer validate` says which panels will light up.
 
+### Video and overlays (live-POC extension, optional)
+
+These additions are what senseai-bench's `replay-compare --runlog` writes for the
+side-by-side video view. All of them are optional, and a log without them still works.
+
+```
+/recording/video/                   attrs: fps, width, height, source, fx, cx (pinhole in video pixels),
+                                           sidecar (optional: another HDF5 file next to this one holding the group)
+    t_ns i64 [F]                    frame times on the master clock
+    jpeg vlen u8 [F]                one JPEG per frame (DSEC left rectified RGB, 20 Hz, 640 px wide)
+    event_jpeg vlen u8 [F]          optional event-camera accumulation image for the same window
+/recording/ground_truth/boxes       table: t_ns, x, y, w, h, cls, track_id   (video pixels)
+/recording/ground_truth/tracks      optional table: track_id, cls, t_ns      (corridor entry per track)
+/pipelines/<arm>/                   attrs: kind = "reflex" | "detector"
+    boxes                           detector arms, table: t_ns, x, y, w, h, cls, score, in_corridor;
+                                    attr corridor = polygon [[x, y], ...] in video pixels
+```
+
+A **table** is either a group of equal-length column datasets or one compound dataset. A
+detector arm writes `reflex/action` (`slow` while a scored box is in the corridor) and no
+surprise. The viewer treats it as having no surprise even if zero-filled datasets exist.
+When `tracks` is missing, corridor entry is the first labelled box whose bottom centre lies
+in a detector's corridor, or the track's first box if no corridor is recorded.
+
 ---
 
 ## The window API
@@ -304,6 +328,20 @@ Implemented:
 | `GET /api/compare?a={run}[:{pipeline}]&b=...[&at=t]` | Aligned clock and head-to-head stats. |
 | `GET /api/runs/{id}/incidents`, `GET /api/runs/{id}/incidents/export?t=&pipeline=&half=2` | Fire and event list; the ±2 s JSON bundle for a safety report. |
 
+Live POC (video always on; runner only with `SENSEAI_RUNNER=1`):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/runs/{id}/video` | Frame times, fps, size, `fx`/`cx`, whether an event image exists. 404 without footage. |
+| `GET /api/runs/{id}/video/{i}.jpg[?kind=event]` | One frame, cached by the browser for a day. |
+| `GET /api/runs/{id}/overlays?t0&t1` | Per frame in the window (at most 30 s): ground-truth boxes, detector boxes and corridor, and each reflex arm's action, speed scale, global surprise and 72-bin bearing ring. |
+| `GET /api/runs/{id}/reactions?a&b` | Each labelled object's corridor entry, each arm's first reaction in `[t_gt − 2 s, t_gt + 1 s]` (attribution: any active tick), and the median lead of `a` over `b`. |
+| `GET /api/runner/options` | DSEC sequences under `SENSEAI_DATA_ROOT`, darkest first (frames, duration, labels, brightness, night), and every contestant with whether it can run here. `{"enabled": false}` when the runner is off. |
+| `POST /api/runner/runs` `{sequences, arms, max_seconds?}` | Start a run (one at a time; 409 while one is going). |
+| `GET /api/runner/runs`, `GET /api/runner/runs/{id}` | History and one run (status, exact command, headline, RunLog ids). |
+| `GET /api/runner/runs/{id}/events` | Server-Sent Events: the run's `events.jsonl`, replayed from the start, then followed until `run_end`. |
+| `POST /api/runner/runs/{id}/cancel` | Stop it (SIGTERM, then SIGKILL after 5 s). |
+
 Planned (need the database, auth or upstream contracts):
 
 | Endpoint | Purpose |
@@ -375,6 +413,62 @@ open http://127.0.0.1:8000/s/demo
 `make test lint type` runs pytest (with the Playwright smoke test), ruff, mypy `--strict`, the
 TypeScript check and the web unit tests. For frontend work, run `npm run dev` in `web/`; it
 proxies `/api` to port 8000.
+
+## Run the POC from the browser (EC2)
+
+On the machine that has the DSEC recordings and senseai-bench, for example an EC2 box, the
+viewer can start the comparison itself and show it live. Open the site, choose recordings
+and contestants, press **Run**, watch each contestant work through the recording, then press
+**Watch side by side** to see the real footage with each model's view drawn on top.
+
+![The Run page while a run is going](docs/screenshot-run-live.png)
+![Side by side: Panther (no training) and the standard camera AI on the same footage](docs/screenshot-side-by-side.png)
+<sub>Both screenshots use the test suite's fake producer and synthetic footage, not a real run.</sub>
+
+**Set up** (once, on the box; senseai-bench installed as in its README):
+
+```bash
+cd viewer/packages/senseai-viewer
+uv sync && (cd web && npm ci && npm run build)
+```
+
+**Serve:**
+
+```bash
+export SENSEAI_RUNNER=1                          # turn the Run page on (it starts processes)
+export SENSEAI_DATA_ROOT=/data/dsec              # where the DSEC sequences are
+export VIEWER_PASSWORD='choose-one'              # optional over a tunnel; required otherwise
+export SENSEAI_BENCH_CMD=/opt/senseai/bench/.venv/bin/senseai-bench   # if not on PATH
+# optional: contestants that need the trained world model
+export SENSEAI_WORLD_CKPT=/models/world/last.ckpt SENSEAI_TOKENS_YAML=/models/tokens.yaml
+uv run senseai-viewer serve --host 127.0.0.1 --port 8000
+```
+
+**Open it from your laptop** through an SSH tunnel, then browse to http://localhost:8000:
+
+```bash
+ssh -L 8000:localhost:8000 ubuntu@<ec2-address>
+```
+
+- **Contestants.** "Panther (no training)" always runs. "Panther", "Panther prior +
+  learned", "Panther (full profile)" and "SenseAI without a profile" appear when
+  `SENSEAI_WORLD_CKPT` and `SENSEAI_TOKENS_YAML` point at existing files. "Standard camera
+  AI (torchvision)" and "YOLO" appear when bench's Python can import `torchvision` /
+  `ultralytics`. The viewer checks bench's interpreter: `SENSEAI_BENCH_PYTHON`, else the
+  bench script's shebang.
+- **What runs.** Exactly one command per run, built in `runner.build_command` and written to
+  the run's `meta.json` and the server log:
+  `senseai-bench replay-compare --sequence <dir> … --arms <a,b> [--max-seconds N]
+  [--sdk-config …] --out <run>/report --events <run>/events.jsonl --runlog <run>/`.
+- **Where it goes.** Each run lives in `DATA_DIR/live/<run-id>/`, holding `meta.json`,
+  `bench.log`, `events.jsonl` and the RunLogs. Finished RunLogs join the normal run list,
+  and their simple view is the side-by-side video. A run that crashes keeps its log and is
+  marked failed. Its partial RunLogs are not served.
+- **Security.** The runner starts processes on the box. It is off unless `SENSEAI_RUNNER=1`.
+  Without `VIEWER_PASSWORD`, the runner answers only requests from the box itself (which is
+  how an SSH tunnel arrives). With it, every page needs the password. Keep the port closed
+  in the EC2 security group, and reach it through the tunnel. Contestants and recordings are
+  picked from lists the server built itself, so a request cannot inject arguments.
 
 ## Deploy on Railway
 
@@ -504,6 +598,13 @@ packages/senseai-viewer/
     stats.py        every number on screen
     wire.py         msgpack / JSON encoding of window bundles
     validate.py     senseai-viewer validate
+    runner.py       the Run page backend: DSEC discovery, the bench command, runs, history
+    live.py         video / overlay / reactions routes and the runner routes (SSE)
+    video.py        footage index, per-frame overlays, first reaction per labelled object
+    arms.py         contestant names, plain labels, what each needs
+    auth.py         HTTP Basic auth (VIEWER_PASSWORD)
+    png.py          PNG brightness without Pillow (darkest-first sorting)
+    sample_video.py synthetic RunLog with footage (tests, screenshots; needs Pillow)
     sample_data.py  the synthetic Panther-vs-default run
     readers/        runlog.py (HDF5 accessors), window.py (window bundles)
     cli.py
@@ -511,7 +612,7 @@ packages/senseai-viewer/
     main.ts         router
     api/            typed client, msgpack decoder, 2 s chunk cache
     panels/         scene, timeline, side panels (senses, tiles, explain, events), transport
-    pages/          runs, replay, compare, incidents
+    pages/          runs, replay, compare, incidents, story (simple view), run (live POC), video (side by side)
     state/          playback clock, layers, URL state
   tests/            pytest + Playwright smoke
   examples/demo_run.py
