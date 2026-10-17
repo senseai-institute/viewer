@@ -171,18 +171,22 @@ def test_replay_smoke(server: str) -> None:
 
 @pytest.fixture(scope="module")
 def runner_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """A real server with the runner on, a DSEC-like folder and the fake bench producer."""
-    import os
+    """A real server with the runner on, a fake SenseAI stack and DSEC-like recordings."""
     import sys
 
-    from .test_runner import FAKE, make_dsec
+    from senseai_viewer.runner import prepare as prep
+
+    from .dsec_helpers import make_local_quirky
+    from .fakestack import make_stack, pythonpath_with
 
     if not (STATIC / "index.html").exists():
         pytest.skip("web app not built (make build)")
     tmp = tmp_path_factory.mktemp("live")
-    dsec = make_dsec(tmp / "dsec")
-    old = {k: os.environ.get(k) for k in ("FAKE_BENCH_DELAY",)}
-    os.environ["FAKE_BENCH_DELAY"] = "0.05"
+    stack, pkgs = make_stack(tmp)
+    dsec = tmp / "dsec"
+    for name, level in (("zurich_city_04_a", 20), ("zurich_city_09_a", 25)):
+        assert prep.prepare(make_local_quirky(dsec, name, level))["status"] == "ready"
+    make_local_quirky(dsec, "zurich_city_10_a", 30)  # on disk, prepared from the page
     app = create_app(
         Settings(
             data_dir=tmp / "data",
@@ -193,28 +197,36 @@ def runner_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             cache_mb=16,
             runner=True,
             data_root=dsec,
-            bench_cmd=f"{sys.executable} {FAKE}",
+            stack_dir=stack,
+            bench_cmd=str(stack / ".venv" / "bin" / "senseai-bench"),
             bench_python=sys.executable,
         )
     )
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    th = threading.Thread(target=srv.run, daemon=True)
-    th.start()
-    for _ in range(100):
-        if srv.started:
-            break
-        time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    srv.should_exit = True
-    th.join(5)
-    for k, v in old.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
+    with pytest.MonkeyPatch.context() as mp:
+        for k, v in {
+            "PYTHONPATH": pythonpath_with(pkgs),
+            "FAKE_DELAY": "0.8",
+            "FAKE_BENCH_DELAY": "0.03",
+            "AWS_ACCESS_KEY_ID": "x",
+            "AWS_SECRET_ACCESS_KEY": "x",
+            "AWS_DEFAULT_REGION": "eu-central-1",
+            "AWS_ENDPOINT_URL_S3": "http://127.0.0.1:9",
+            "AWS_MAX_ATTEMPTS": "1",
+        }.items():
+            mp.setenv(k, v)
+        srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+        th = threading.Thread(target=srv.run, daemon=True)
+        th.start()
+        for _ in range(100):
+            if srv.started:
+                break
+            time.sleep(0.05)
+        yield f"http://127.0.0.1:{port}"
+        srv.should_exit = True
+        th.join(5)
 
 
 def test_run_page_and_side_by_side(runner_server: str) -> None:
@@ -227,27 +239,68 @@ def test_run_page_and_side_by_side(runner_server: str) -> None:
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{runner_server}/")  # the runner is on, so the root opens the Run page
-        page.wait_for_selector(".pick")
-        page.wait_for_function("() => !document.body.innerText.includes('measuring brightness')")
-        names = page.locator("#app .pick-title").all_inner_texts()
-        assert names[0].startswith("zurich_city_09_a")  # darkest first
-        assert "NIGHT" in names[0].upper() and "LABELS" in names[0].upper()
-        assert page.get_by_text("Panther (no training)").count() >= 1
+        page.wait_for_selector("table.data tr.data-row")
         assert page.get_by_role("link", name="Run", exact=True).count() == 1
-        page.click(".run-btn")
-        page.wait_for_selector(".arm-card")
+        rows = page.locator("table.data tr.data-row")
+        assert rows.first.get_attribute("data-seq") == "zurich_city_04_a"  # darkest first
+        page.wait_for_selector(".checks .check")
+        assert "SenseAI software" in page.locator(".checks").inner_text()
+
+        # Data: Fetch & prepare the one recording that is only on disk.
+        row = page.locator('tr.data-row[data-seq="zurich_city_10_a"]')
+        assert "on disk" in row.inner_text().lower()
+        row.get_by_role("button", name="Fetch & prepare").click()
         page.wait_for_function(
-            "() => /· ([3-9]\\d)%/.test(document.querySelector('.run-status')?.textContent ?? '')"
+            "() => document.querySelector('tr.data-row[data-seq=\"zurich_city_10_a\"]')"
+            "?.innerText.toLowerCase().includes('ready')",
+            timeout=30_000,
+        )
+
+        # Run: train on one, test on another; YOLO is labelled benchmark-only.
+        assert "benchmark only · agpl" in page.locator(".pick-list.arms").inner_text().lower()
+        assert page.locator(".run-btn").is_disabled()
+        page.get_by_label("train on zurich_city_04_a").check()
+        page.get_by_label("test on zurich_city_09_a").check()
+        page.get_by_label("train on zurich_city_09_a").check()  # moving it to train unticks test
+        assert not page.get_by_label("test on zurich_city_09_a").is_checked()
+        page.get_by_label("test on zurich_city_09_a").check()
+        assert not page.get_by_label("train on zurich_city_09_a").is_checked()
+        assert page.get_by_label("Training steps").input_value() == "2000"
+        page.get_by_label("Training steps").fill("100")
+        page.get_by_label("Training steps").dispatch_event("change")
+        DOCS.mkdir(exist_ok=True)
+        page.screenshot(path=str(DOCS / "screenshot-run-page.png"), full_page=True)
+        page.click(".run-btn")
+
+        # Progress: five steps, a live log, Cancel while it runs.
+        page.wait_for_selector(".stage.running")
+        assert page.locator(".stages .stage").count() == 5
+        assert page.get_by_role("button", name="Cancel").count() == 1
+        page.wait_for_function(
+            "() => document.querySelector('.run-progress pre.log')"
+            "?.textContent.includes('senseai-')"
         )
         DOCS.mkdir(exist_ok=True)
-        page.locator(".run-live").screenshot(path=str(DOCS / "screenshot-run-live.png"))
-        page.wait_for_selector(".run-watch a", timeout=60_000)
-        assert "reacted" in page.locator(".run-headline").inner_text()
-        assert page.locator("table.results tbody tr").count() == 1
-        page.locator(".run-live").screenshot(path=str(DOCS / "screenshot-run-done.png"))
-        assert page.locator(".run-history .run-row").count() == 1
+        page.wait_for_selector('.stage.running:has-text("Train model")', timeout=30_000)
+        page.locator(".run-progress").screenshot(path=str(DOCS / "screenshot-run-live.png"))
 
-        page.click(".run-watch a")
+        # Results: head-to-head tiles and links; still there after a reload.
+        page.wait_for_selector(".run-headline", timeout=90_000)
+        assert page.locator(".stage.done").count() == 5
+        assert page.locator(".tiles .tile").count() >= 1
+        page.reload()
+        page.wait_for_selector(".run-headline")
+        assert page.locator(".run-history .run-row").count() == 1
+        assert (
+            page.get_by_role("link", name="Open in Compare")
+            .get_attribute("href", timeout=5000)
+            .startswith("/compare/")
+        )
+        page.locator(".run-panel:has(.run-headline)").screenshot(
+            path=str(DOCS / "screenshot-run-done.png")
+        )
+
+        page.click(".run-watch a.btn.primary")
         page.wait_for_selector(".vpane canvas")
         assert page.locator(".vpane").count() == 2
         assert page.locator(".vpane-title").all_inner_texts() == [

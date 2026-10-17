@@ -73,3 +73,31 @@ export function profileLabel(profile: string, version: number): string {
   if (profile === "null") return "default";
   return `${profile[0].toUpperCase()}${profile.slice(1)} v${version}`;
 }
+
+/** 1536 -> "1.5 KB"; null -> "—". */
+export function bytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+}
+
+/** Seconds as "45 s", "12 min", "2 h 05 min". */
+export function span(s: number | null | undefined): string {
+  if (s === null || s === undefined || !Number.isFinite(s)) return "—";
+  if (s < 90) return `${Math.max(0, Math.round(s))} s`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
+/** Time left in a step from how long it has run and how far it is (null until it is measurable). */
+export function eta(elapsedS: number, frac: number | null): number | null {
+  if (frac === null || frac < 0.02 || frac >= 1 || elapsedS < 5) return null;
+  return (elapsedS / frac) * (1 - frac);
+}

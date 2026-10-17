@@ -4,7 +4,7 @@
 // Router. Plain links and full page loads; every page keeps its state in the URL.
 //   /                      the Run page when the runner is on, else the simple view of the demo run
 //   /s/{run}, /story/{run} the simple view: side-by-side video for runs with footage, else the story
-//   /run                   pick recordings and contestants, run, watch live (SENSEAI_RUNNER=1)
+//   /run                   Setup, Data, Run, Progress, Results: one click from S3 to a report (SENSEAI_RUNNER=1)
 //   /runs                  all runs
 //   /replay/{run}          the detailed view
 //   /compare/{run}         compare the run's default pair; /compare?a=run:pipe&b=run:pipe
@@ -12,9 +12,8 @@
 // "demo" as {run} means the first synthetic run on the server.
 
 import "./theme.css";
-import { api } from "./api/client.ts";
+import { api, run } from "./api/client.ts";
 import { el, features } from "./components/chrome.ts";
-import { runner } from "./api/client.ts";
 import { comparePage } from "./pages/compare.ts";
 import { incidentsPage } from "./pages/incidents.ts";
 import { replayPage } from "./pages/replay.ts";
@@ -34,7 +33,7 @@ async function resolve(run: string): Promise<string> {
 async function route(root: HTMLElement): Promise<void> {
   const parts = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const [page, arg] = parts;
-  features.runner = await runner.options().then((o) => o.enabled, () => false);
+  features.runner = await run.status().then((o) => o.enabled, () => false);
   if (!page) return features.runner ? runPage(root) : simpleView(root, await resolve("demo"), storyPage);
   if (page === "run") return runPage(root);
   if ((page === "s" || page === "story") && arg) return simpleView(root, await resolve(arg), storyPage);
