@@ -12,6 +12,9 @@ export interface PipelineMeta {
   profile_version: number;
   heads: string[];
   layers: Record<string, boolean>;
+  kind?: "reflex" | "detector";
+  label?: string;
+  bearing_p99?: number | null;
   grid_cells?: number;
   grid_half_extent_m?: number;
   bearing_bins?: number;
@@ -91,6 +94,8 @@ export interface RunIndex {
   events: FeedEvent[];
   default_pair: [string, string] | null;
   head_to_head: HeadToHead | null;
+  video?: { frames: number; fps: number; width: number; height: number; has_event: boolean } | null;
+  video_pair?: [string, string] | null;
 }
 
 export interface RunSummary {
@@ -191,6 +196,132 @@ async function getJSON<T>(url: string): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
   return (await r.json()) as T;
 }
+
+export interface VideoMeta {
+  frames: number;
+  fps: number;
+  width: number;
+  height: number;
+  source: string;
+  has_event: boolean;
+  fx: number | null;
+  cx: number | null;
+  t_s: number[];
+}
+
+/** [x, y, w, h, cls, score, in_corridor] for detectors; [x, y, w, h, cls, track_id] for ground truth. */
+export type Box = [number, number, number, number, string, number | boolean | null, boolean | null];
+
+export interface OverlayArm {
+  kind: "reflex" | "detector";
+  label: string;
+  action?: string[];
+  speed_scale?: number[];
+  global?: number[];
+  bearing?: number[][];
+  boxes?: Record<string, Box[]>;
+  corridor?: [number, number][] | null;
+}
+
+export interface Overlays {
+  frame0: number;
+  frame1: number;
+  gt: Record<string, Box[]>;
+  arms: Record<string, OverlayArm>;
+}
+
+export interface Reactions {
+  window_pre_s: number;
+  window_post_s: number;
+  attribution: string;
+  objects: { track_id: number; cls: string; t_gt_s: number; reactions: Record<string, number | null> }[];
+  fires: Record<string, number[]>;
+  pair?: { a: string; b: string; both: number; only_a: number; only_b: number; neither: number; median_lead_s: number | null };
+}
+
+export interface RunnerArm {
+  name: string;
+  label: string;
+  kind: "reflex" | "detector";
+  blurb: string;
+  available: boolean;
+  reason: string;
+}
+
+export interface RunnerSequence {
+  name: string;
+  path: string;
+  frames: number;
+  duration_s: number;
+  labels: boolean;
+  brightness: number | null;
+  night: boolean;
+}
+
+export interface RunnerOptions {
+  enabled: boolean;
+  data_root?: string | null;
+  bench_found?: boolean;
+  sequences?: RunnerSequence[];
+  brightness_pending?: boolean;
+  arms?: RunnerArm[];
+  busy?: string | null;
+}
+
+export interface RunnerRun {
+  id: string;
+  created: string;
+  sequences: string[];
+  arms: string[];
+  max_seconds: number | null;
+  command: string[];
+  status: "running" | "finished" | "failed" | "cancelled";
+  exit_code: number | null;
+  headline: string;
+  error: string | null;
+  runlog_ids: string[];
+  ended: string | null;
+  active: boolean;
+}
+
+async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method,
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let msg = `${r.status}`;
+    try {
+      const j = (await r.json()) as { detail?: unknown };
+      msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j);
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(msg);
+  }
+  return (await r.json()) as T;
+}
+
+export const runner = {
+  options: () => getJSON<RunnerOptions>("/api/runner/options"),
+  start: (sequences: string[], arms: string[], max_seconds: number | null) =>
+    send<RunnerRun>("POST", "/api/runner/runs", { sequences, arms, max_seconds }),
+  get: (id: string) => getJSON<RunnerRun>(`/api/runner/runs/${encodeURIComponent(id)}`),
+  history: () => getJSON<RunnerRun[]>("/api/runner/runs"),
+  cancel: (id: string) => send<RunnerRun>("POST", `/api/runner/runs/${encodeURIComponent(id)}/cancel`),
+  eventsUrl: (id: string) => `/api/runner/runs/${encodeURIComponent(id)}/events`,
+};
+
+export const videoApi = {
+  meta: (run: string) => getJSON<VideoMeta>(`/api/runs/${encodeURIComponent(run)}/video`),
+  frameUrl: (run: string, i: number, kind: "rgb" | "event" = "rgb") =>
+    `/api/runs/${encodeURIComponent(run)}/video/${i}.jpg${kind === "event" ? "?kind=event" : ""}`,
+  overlays: (run: string, t0: number, t1: number) =>
+    getJSON<Overlays>(`/api/runs/${encodeURIComponent(run)}/overlays?t0=${t0}&t1=${t1}`),
+  reactions: (run: string, a?: string, b?: string) =>
+    getJSON<Reactions>(`/api/runs/${encodeURIComponent(run)}/reactions${a && b ? `?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}` : ""}`),
+};
 
 export const api = {
   runs: () => getJSON<RunSummary[]>("/api/runs"),

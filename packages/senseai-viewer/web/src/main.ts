@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Router. Plain links and full page loads; every page keeps its state in the URL.
-//   /                      the simple view of the demo run (first synthetic run)
-//   /s/{run}, /story/{run} the simple view: one story in plain words (the share link)
+//   /                      the Run page when the runner is on, else the simple view of the demo run
+//   /s/{run}, /story/{run} the simple view: side-by-side video for runs with footage, else the story
+//   /run                   pick recordings and contestants, run, watch live (SENSEAI_RUNNER=1)
 //   /runs                  all runs
 //   /replay/{run}          the detailed view
 //   /compare/{run}         compare the run's default pair; /compare?a=run:pipe&b=run:pipe
@@ -12,12 +13,15 @@
 
 import "./theme.css";
 import { api } from "./api/client.ts";
-import { el } from "./components/chrome.ts";
+import { el, features } from "./components/chrome.ts";
+import { runner } from "./api/client.ts";
 import { comparePage } from "./pages/compare.ts";
 import { incidentsPage } from "./pages/incidents.ts";
 import { replayPage } from "./pages/replay.ts";
 import { runsPage } from "./pages/runs.ts";
+import { runPage } from "./pages/run.ts";
 import { storyPage } from "./pages/story.ts";
+import { simpleView } from "./pages/video.ts";
 
 async function resolve(run: string): Promise<string> {
   if (run !== "demo") return run;
@@ -30,8 +34,10 @@ async function resolve(run: string): Promise<string> {
 async function route(root: HTMLElement): Promise<void> {
   const parts = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const [page, arg] = parts;
-  if (!page) return storyPage(root, await resolve("demo"));
-  if ((page === "s" || page === "story") && arg) return storyPage(root, await resolve(arg));
+  features.runner = await runner.options().then((o) => o.enabled, () => false);
+  if (!page) return features.runner ? runPage(root) : simpleView(root, await resolve("demo"), storyPage);
+  if (page === "run") return runPage(root);
+  if ((page === "s" || page === "story") && arg) return simpleView(root, await resolve(arg), storyPage);
   if (page === "runs") return runsPage(root);
   if (page === "replay" && arg) return replayPage(root, await resolve(arg), false);
   if (page === "compare") return comparePage(root, arg ? await resolve(arg) : null);
