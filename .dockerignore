@@ -12,3 +12,8 @@ src/senseai_viewer/static
 test-results
 tests
 docs
+**/.venv
+**/data
+packages/senseai-viewer/server/senseai_viewer/static
+packages/senseai-viewer/tests
+packages/senseai-viewer/docs
