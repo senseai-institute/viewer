@@ -22,7 +22,7 @@ from senseai_viewer import arms, stats
 from senseai_viewer.readers.runlog import RunLog
 
 INDEX_VERSION = 1
-_CACHE_REV = 2  # bump when the index gains fields, so cached files are rebuilt
+_CACHE_REV = 3  # bump when the index gains fields, so cached files are rebuilt
 MAX_BUCKETS = 4000
 
 
@@ -42,10 +42,17 @@ def bucket_max(a: NDArray[Any], starts: NDArray[np.int64]) -> list[float]:
 
 
 def default_pair(log: RunLog) -> tuple[str, str] | None:
-    """Return the default comparison pair: the first non-null profile vs the null profile."""
+    """Return the default comparison pair.
+
+    Bench runs: the Panther arm vs the standard camera detector (``arms.default_pair``).
+    Otherwise the first non-null profile vs the null profile.
+    """
     names = [p.name for p in log.pipelines()]
     if len(names) < 2:
         return None
+    contest = arms.default_pair(names)
+    if contest:
+        return contest
     nulls = [p.name for p in log.pipelines() if p.profile == "null" or p.pipeline == "null_profile"]
     b = nulls[0] if nulls else names[1]
     a = next(n for n in names if n != b)
@@ -148,7 +155,7 @@ def build_index(log: RunLog) -> dict[str, Any]:
             for p in pipes
         ],
         "layers": rec,
-        "ground_truth": {k: v for k, v in gt.items() if k != "actor_ids"},
+        "ground_truth": {k: v for k, v in gt.items() if k != "actor_ids"} | gt_note(gt),
         "timeline": timeline,
         "fires": fires,
         "events": events,
@@ -156,6 +163,31 @@ def build_index(log: RunLog) -> dict[str, Any]:
         "head_to_head": h2h,
         "video": _video_summary(log),
         "video_pair": list(vp) if (vp := arms.default_pair([p.name for p in pipes])) else None,
+    }
+
+
+def gt_note(gt: dict[str, Any]) -> dict[str, Any]:
+    """Say what the run's ground truth is, in plain words (``pseudo`` and ``note``)."""
+    src = str(gt.get("source", ""))
+    if src.startswith("pseudo-gt"):
+        arm = src.partition(":")[2] or "a detector"
+        name = arms.label(arm)
+        return {
+            "pseudo": True,
+            "note": f"This recording has no labels. {name}'s own confident detections, linked "
+            f"in hindsight, stand in as ground truth, which favours {name} by construction.",
+        }
+    return {"pseudo": False, "note": ""}
+
+
+LIST_KEYS = ("run_id", "title", "mode", "scenario", "synthetic", "duration_s", "default_pair")
+
+
+def list_row(idx: dict[str, Any]) -> dict[str, Any]:
+    """One row of ``GET /api/runs`` from a run's index."""
+    return {k: idx.get(k) for k in LIST_KEYS} | {
+        "pipelines": [p["name"] for p in idx["pipelines"]],
+        "fires": len(idx["fires"]),
     }
 
 

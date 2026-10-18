@@ -147,7 +147,9 @@ export class Timeline {
       const idx = s.index ?? this.index;
       for (const v of idx.timeline[key][s.pipeline] ?? []) ymax = Math.max(ymax, v);
       const th = idx.timeline.threshold[s.pipeline];
-      if (this.mode === "risk" && th != null) thr = th;
+      // One threshold line: the first series' (a detector's score threshold is on another scale).
+      const det = idx.pipelines.find((p) => p.name === s.pipeline)?.kind === "detector";
+      if (this.mode === "risk" && th != null && thr === null && !det) thr = th;
     }
     if (thr !== null) ymax = Math.max(ymax, thr * 1.6);
     ymax = ymax > 0 ? ymax * 1.08 : 1;

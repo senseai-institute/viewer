@@ -1,6 +1,6 @@
 # Copyright 2026 SenseAI Institute
 # SPDX-License-Identifier: Apache-2.0
-"""``senseai-viewer`` command line: serve, sample, validate, index."""
+"""``senseai-viewer`` command line: serve, sample, validate, index, push."""
 
 from __future__ import annotations
 
@@ -26,7 +26,18 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("files", type=Path, nargs="+")
     i = sub.add_parser("index", help="print a RunLog's index as JSON")
     i.add_argument("file", type=Path)
+    pu = sub.add_parser("push", help="put a bench run folder on the deployed viewer (via S3)")
+    pu.add_argument("--run", type=Path, required=True, help="run folder, e.g. ~/runs/zurich_smoke")
+    pu.add_argument("--to", help="viewer URL, e.g. https://<name>.up.railway.app")
+    pu.add_argument("--s3", default=os.environ.get("SENSEAI_RUNS_S3", "s3://senseai-data/runs/"))
+    pu.add_argument("--name", help="run id (default: the folder name)")
+    pu.add_argument("--direct", action="store_true", help="upload a tarball instead of using S3")
     args = ap.parse_args(argv)
+
+    if args.cmd == "push":
+        from senseai_viewer.push import push
+
+        return push(args.run, args.to, args.s3, args.name, args.direct)
 
     if args.cmd == "serve":
         import uvicorn

@@ -62,6 +62,28 @@ export interface HeadToHead {
   cells_lit_at_s: number | null;
 }
 
+/** bench's replay_report.json (the fields the viewer shows). */
+export interface ReplayReport {
+  mode: "labels" | "agreement" | "mixed" | "unlabelled";
+  pseudo_gt_arm: string | null;
+  arm_labels: Record<string, string>;
+  n_tracks: number;
+  arms: Record<
+    string,
+    {
+      kind: string;
+      errors: string[];
+      tracks: number;
+      hits: number;
+      hit_rate: number | null;
+      delay: { n: number; median_s: number | null };
+      unattributed_fires_per_hour: number | null;
+      latency: { p99_ms: number | null };
+    }
+  >;
+  leads: Record<string, Record<string, { n: number; median_s: number | null }>>;
+}
+
 export interface RunIndex {
   run_id: string;
   title: string;
@@ -83,7 +105,11 @@ export interface RunIndex {
     clean_segments_s?: [number, number][];
     window_pre_s?: number;
     window_post_s?: number;
+    source?: string;
+    pseudo?: boolean;
+    note?: string;
   };
+  attachments?: string[];
   timeline: {
     t_s: number[];
     global_max: Record<string, number[]>;
@@ -189,6 +215,12 @@ export interface Window {
     robot_speed?: NDArray<Float32Array>;
   };
   pipelines: Record<string, PipelineWindow>;
+}
+
+async function getText(url: string): Promise<string> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  return r.text();
 }
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -406,6 +438,9 @@ export const videoApi = {
 };
 
 export const api = {
+  report: (run: string) => getText(`/api/runs/${encodeURIComponent(run)}/report`),
+  reportJson: (run: string) => getJSON<ReplayReport>(`/api/runs/${encodeURIComponent(run)}/report.json`),
+  training: (run: string) => getText(`/api/runs/${encodeURIComponent(run)}/training`),
   runs: () => getJSON<RunSummary[]>("/api/runs"),
   index: (run: string) => getJSON<RunIndex>(`/api/runs/${encodeURIComponent(run)}/index`),
   compare: (a: string, b: string) =>

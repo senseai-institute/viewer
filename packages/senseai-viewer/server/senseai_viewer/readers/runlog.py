@@ -338,6 +338,8 @@ class RunLog:
         for key in ("window_pre_s", "window_post_s", "corridor_margin_m", "lookahead_s"):
             if key in a:
                 out[key] = float(a[key])
+        if "source" in a:  # bench: "labels" file name, or "pseudo-gt:<arm>" in agreement mode
+            out["source"] = str(_decode(a["source"]))
         if "clean_segments_ns" in g:
             seg = np.asarray(g["clean_segments_ns"][()], dtype=np.int64).reshape(-1, 2)
             out["clean_segments_s"] = [[self.ns_to_s(int(s)), self.ns_to_s(int(e))] for s, e in seg]
