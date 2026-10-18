@@ -30,7 +30,7 @@ export class Senses {
   private risk: { bar: HTMLElement; thr: HTMLElement; val: HTMLElement };
   private note: HTMLElement;
 
-  constructor(heads: string[], otherLabel: string | null) {
+  constructor(heads: string[], otherLabel: string | null, detector: string | null = null) {
     const p = panel("Senses");
     this.root = p.root;
     const bars = h("div", "bars");
@@ -59,6 +59,12 @@ export class Senses {
     this.note.style.fontSize = "12px";
     this.note.style.marginTop = "8px";
     this.note.textContent = otherLabel ? `Bars: per-head surprise, 0–10. The grey tick is ${otherLabel} at the same moment.` : "Bars: per-head surprise, 0–10.";
+    if (detector) {
+      // A detector arm has no world model: nothing to show as senses or surprise.
+      this.note.textContent = `${detector} is an object detector: it has no senses and no surprise. It draws boxes on the camera image, and counts as reacting while a box is in the path.`;
+      this.root.append(this.note);
+      return;
+    }
     this.root.append(bars, this.note);
   }
 

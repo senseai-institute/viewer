@@ -16,9 +16,11 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from senseai_viewer import __version__, sample_data, stats, wire
+from senseai_viewer import index as index_mod
+from senseai_viewer.api.imports import add_import_routes
 from senseai_viewer.api.run import add_run_routes
 from senseai_viewer.auth import BasicAuth
 from senseai_viewer.live import add_video_routes
@@ -82,11 +84,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tmp.replace(store.runs_dir / DEMO_FILE)
             store.rescan()
         for rid in store.ids():
-            store.index(rid)  # precompute at startup, not at view
+            if store.is_local(rid):  # runs in S3 are fetched when first opened
+                store.index(rid)  # precompute at startup, not at view
         yield
 
     app = FastAPI(title="senseai-viewer", version=__version__, lifespan=lifespan)
-    app.state.store = Store(writable_data_dir(cfg.data_dir), cfg.cache_mb)
+    remote = None
+    if cfg.runs_s3:
+        from senseai_viewer.remote import RemoteRuns
+
+        remote = RemoteRuns(cfg.runs_s3)
+    app.state.store = Store(
+        writable_data_dir(cfg.data_dir), cfg.cache_mb, remote, int(cfg.cache_gb * 1024**3)
+    )
     app.state.settings = cfg
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     if cfg.viewer_password:
@@ -114,32 +124,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/health")
     @app.get("/healthz", include_in_schema=False)
     def health() -> dict[str, object]:
-        return {"status": "ok", "version": __version__, "runs": len(store().ids())}
+        st = store()
+        out: dict[str, object] = {"status": "ok", "version": __version__, "runs": len(st.ids())}
+        if st.remote is not None:
+            out["runs_s3"] = {"uri": st.remote.uri, "error": st.remote.error}
+        return out
 
     @app.get("/api/runs")
     def runs() -> list[dict[str, object]]:
         out = []
-        for rid in store().ids():
-            idx = store().index(rid)
-            out.append(
-                {
-                    k: idx.get(k)
-                    for k in (
-                        "run_id",
-                        "title",
-                        "mode",
-                        "scenario",
-                        "synthetic",
-                        "duration_s",
-                        "default_pair",
-                    )
-                }
-                | {
-                    "pipelines": [p["name"] for p in idx["pipelines"]],
-                    "fires": len(idx["fires"]),
-                }
-            )
+        st = store()
+        for rid in st.ids():
+            row = None if st.is_local(rid) else st.remote_row(rid)
+            out.append(row if row is not None else index_mod.list_row(st.index(rid)))
         return out
+
+    @app.get("/api/runs/{run_id}/report")
+    def report_md(run_id: str) -> PlainTextResponse:
+        """Bench's ``replay_report.md`` for the run (404 if it came without one)."""
+        return PlainTextResponse(
+            _attachment(run_id, "report.md").read_text("utf-8"), media_type="text/markdown"
+        )
+
+    @app.get("/api/runs/{run_id}/report.json")
+    def report_json(run_id: str) -> Response:
+        """Bench's ``replay_report.json`` for the run."""
+        return Response(
+            _attachment(run_id, "report.json").read_bytes(), media_type="application/json"
+        )
+
+    @app.get("/api/runs/{run_id}/training")
+    def training(run_id: str) -> PlainTextResponse:
+        """Return the world model's training log, if the run came with one."""
+        return PlainTextResponse(
+            _attachment(run_id, "training.txt").read_text("utf-8", errors="replace")
+        )
+
+    def _attachment(run_id: str, kind: str) -> Path:
+        try:
+            p = store().attachment(run_id, kind)
+        except KeyError as e:
+            raise HTTPException(404, f"no run {run_id!r}") from e
+        if p is None:
+            raise HTTPException(404, f"run {run_id!r} has no {kind}")
+        return p
 
     @app.get("/api/runs/{run_id}")
     @app.get("/api/runs/{run_id}/index")
@@ -344,6 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _json(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     add_video_routes(app, get_log)
+    add_import_routes(app, cfg, store, require_token)
     app.state.supervisor = add_run_routes(app, cfg, store) if cfg.runner else None
 
     @app.get("/api/run/status")

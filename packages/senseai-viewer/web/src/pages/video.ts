@@ -10,6 +10,7 @@ import { api, type Box, type OverlayArm, type Overlays, type Reactions, type Run
 import { armColor, statusOf } from "../arms.ts";
 import { el, topbar } from "../components/chrome.ts";
 import { Player, SPEEDS, UrlState } from "../state/player.ts";
+import { gtNote } from "../panels/contest.ts";
 
 const CHUNK_S = 10;
 const AHEAD_S = 2.5;
@@ -271,6 +272,8 @@ export async function videoPage(root: HTMLElement, run: string, idx: RunIndex): 
   const sub = el("p");
   head.append(h1, sub);
   main.append(head);
+  const gt = gtNote(idx);
+  if (gt) main.append(gt);
 
   const views = el("section", "vpanes");
   const repick = async (side: "a" | "b", arm: string) => {
@@ -345,7 +348,7 @@ export async function videoPage(root: HTMLElement, run: string, idx: RunIndex): 
     sub.textContent = "";
     if (!p || !rx.objects.length) {
       h1.textContent = idx.title;
-      sub.textContent = rx.objects.length ? "" : "This recording has no labelled objects, so there is nothing to time reactions against.";
+      sub.textContent = rx.objects.length ? "" : `This recording has no ${idx.ground_truth.pseudo ? "" : "labelled "}objects in the path, so there is nothing to time reactions against.`;
       return;
     }
     if (p.median_lead_s === null) {
@@ -356,7 +359,8 @@ export async function videoPage(root: HTMLElement, run: string, idx: RunIndex): 
       h1.append(el("em", undefined, ms === 0 ? "at the same time as" : `${ms} ms ${p.median_lead_s > 0 ? "earlier" : "later"}`));
       h1.append(ms === 0 ? ` ${short(p.b)}.` : ` than ${short(p.b)}.`);
     }
-    const parts = [`Median over ${p.both} labelled object${p.both === 1 ? "" : "s"} both caught`];
+    const what = idx.ground_truth.pseudo ? "object" : "labelled object";
+    const parts = [`Median over ${p.both} ${what}${p.both === 1 ? "" : "s"} both caught`];
     if (p.only_a) parts.push(`${short(p.a)} alone caught ${p.only_a}`);
     if (p.only_b) parts.push(`${short(p.b)} alone caught ${p.only_b}`);
     if (p.neither) parts.push(`neither caught ${p.neither}`);

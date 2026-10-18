@@ -44,6 +44,9 @@ class Settings:
     panther_tokens_profile: Path | None = None
     setup_script: Path | None = None
     research_url: str | None = None
+    runs_s3: str | None = None
+    cache_gb: float = 2.0
+    max_import_mb: int = 4096
 
     @property
     def dsec_root(self) -> Path:
@@ -99,4 +102,7 @@ class Settings:
             panther_tokens_profile=_path("SENSEAI_PANTHER_TOKENS_PROFILE"),
             setup_script=_path("SENSEAI_SETUP_SCRIPT"),
             research_url=os.environ.get("RESEARCH_URL") or None,
+            runs_s3=os.environ.get("SENSEAI_RUNS_S3") or None,
+            cache_gb=float(os.environ.get("SENSEAI_CACHE_GB", "2")),
+            max_import_mb=int(os.environ.get("MAX_IMPORT_MB", "4096")),
         )

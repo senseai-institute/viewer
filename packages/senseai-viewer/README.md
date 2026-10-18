@@ -325,6 +325,8 @@ Implemented:
 | `GET /api/health` (also `/healthz`) | Liveness and run count (Railway health check). |
 | `GET /api/runs`, `GET /api/runs/{id}` | List runs; one run's index. |
 | `PUT /api/runs` (raw body, `Authorization: Bearer $UPLOAD_TOKEN`), `DELETE /api/runs/{id}` | Upload a RunLog (validated, indexed, then served) or delete one. Disabled unless `UPLOAD_TOKEN` is set. |
+| `POST /api/runs/import` (Bearer `UPLOAD_TOKEN`) | Register a bench run folder: `{"s3": "s3://…/runs/<run>/"}` or a tarball. Returns Compare, Replay and share links. |
+| `GET /api/runs/{id}/report`, `/report.json`, `/training` | Bench's `replay_report.md` / `.json` and the world training log, when the run came with them (listed in the index as `attachments`). |
 | `GET /api/compare?a={run}[:{pipeline}]&b=...[&at=t]` | Aligned clock and head-to-head stats. |
 | `GET /api/runs/{id}/incidents`, `GET /api/runs/{id}/incidents/export?t=&pipeline=&half=2` | Fire and event list; the ±2 s JSON bundle for a safety report. |
 
@@ -491,6 +493,57 @@ When no chosen contestant needs a trained model, steps 1–4 are skipped.
   by hand. Recordings and contestants come from lists the server built itself, so a request
   cannot inject arguments.
 
+## Real runs on the deployed viewer (bench → S3 → Railway)
+
+A bench run folder (for example `~/runs/zurich_smoke`: `ticks/`, `tokens/`, `world/`,
+`sdk/`, `compare/`, `logs/`) reaches the public viewer in one command on the machine that
+made it:
+
+```bash
+uvx --from 'senseai-viewer[s3] @ git+https://github.com/senseai-institute/viewer#subdirectory=packages/senseai-viewer' \
+  senseai-viewer push --run ~/runs/zurich_smoke --to https://<domain>
+```
+
+`push` finds the run's RunLogs (HDF5 files with `format = senseai/runlog`), `replay_report.md`
+and `.json`, and the world training log. It checks every RunLog with the viewer's validator,
+then copies them byte for byte to `s3://senseai-data/runs/<run>/` with the machine's own
+credentials (the EC2 instance role). A `viewer.json` manifest goes last. The run id is the
+folder name; a folder with several sequences gives `<run>-<sequence>`. Pushing again
+replaces the run. Within a minute the viewer lists it, and `push` prints the Compare, Replay
+and share links. With `SENSEAI_VIEWER_TOKEN` set to the server's `UPLOAD_TOKEN`, the viewer
+loads it at once instead.
+
+**The RunLog is required.** Bench writes it only with `--runlog <dir>`. Timelines (`.npz`) and
+the report don't hold the video, surprise maps or reflex commands, so `push` stops and says
+so when a run has no RunLog.
+
+**On the viewer** (Railway variables):
+
+| Variable | Value |
+|---|---|
+| `SENSEAI_RUNS_S3` | `s3://senseai-data/runs/` |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | a read-only IAM user: `s3:ListBucket` on `senseai-data` with prefix `runs/`, `s3:GetObject` on `senseai-data/runs/*` |
+| `AWS_DEFAULT_REGION` | the bucket's region |
+| `SENSEAI_CACHE_GB` | disk kept for opened runs, default 2 |
+| `UPLOAD_TOKEN` | optional: enables `POST /api/runs/import` and instant loading |
+
+S3 is where runs live; the server's disk is only a cache. The run list comes from the
+manifests, a RunLog is downloaded the first time someone opens it, and the least recently
+opened ones are evicted beyond `SENSEAI_CACHE_GB`. A redeploy loses nothing, and no volume
+is needed. **On EC2** the instance role also needs `s3:PutObject` on `senseai-data/runs/*`.
+
+`POST /api/runs/import` (Bearer `UPLOAD_TOKEN`) takes `{"s3": "s3://senseai-data/runs/<run>/"}`
+or a tarball of the run folder (`push --direct`; only RunLogs, reports and logs are unpacked).
+A tarball is stored in S3 by the server when its credentials allow it.
+
+**What the pages show for a bench run.** Compare opens on Panther vs the standard camera
+detector. Under it, **All contestants** lists every arm with bench's own numbers
+(objects caught, median reaction, false alarms per hour, latency, lead), and bench's
+`replay_report.md` and the training log can be unfolded. A run without labels (DSEC
+agreement mode) carries a note on every page: YOLO's detections, linked in hindsight, are the
+ground truth, which favours YOLO. A detector arm in Replay says it has no senses or surprise.
+Cortex events are not part of a replay run, so the events feed lists reflex fires only.
+
 ## Deploy on Railway
 
 Nothing needs configuring for the demo: with no runs in `DATA_DIR`, the server builds the
@@ -500,8 +553,9 @@ synthetic run on first start (about 2 s) and serves it.
    Leave **Root Directory** empty. The repo-root `Dockerfile` and `railway.json` build this
    viewer. If Root Directory is set to `packages/senseai-viewer`, that works too: it uses
    this directory's `Dockerfile` and `railway.toml`.
-2. Variables left over from v0.1 (`VIEWER_PASSWORD`, `S3_*`, `AWS_*`) are ignored, so you
-   can delete them.
+2. Variables left over from v0.1 (`S3_*`) are ignored, so you can delete them. `AWS_*` are
+   used again, for runs in S3 (next section). `VIEWER_PASSWORD` puts the whole site behind a
+   password, including share links.
 3. Deploy. The build has no compiled dependencies and takes a few minutes; the health check
    is `/api/health`.
 4. Under **Settings → Networking**, choose **Generate Domain**.
@@ -620,6 +674,10 @@ packages/senseai-viewer/
     wire.py         msgpack / JSON encoding of window bundles
     validate.py     senseai-viewer validate
     api/run.py      the Run page API (/api/run/*)
+    api/imports.py  POST /api/runs/import (S3 prefix or tarball of a run folder)
+    bundle.py       a bench run folder: its RunLogs, report, manifest, S3 upload
+    remote.py       runs kept in S3 (SENSEAI_RUNS_S3): manifests, fetch on first open
+    push.py         senseai-viewer push
     runner/         s3.py (bucket), prepare.py (fetch, unpack, arrange, validate), stages.py
                     (the five POC steps), jobs.py (detached jobs, cancel, resume), setup.py
                     (checks, install), tools.py (stack CLIs, the bench command), package_helper.py

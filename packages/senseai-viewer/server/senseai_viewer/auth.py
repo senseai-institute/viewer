@@ -64,12 +64,14 @@ class BasicAuth:
             k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
         }
         auth = headers.get("authorization", "")
-        if (
+        token_route = (
             scope.get("method") in ("PUT", "DELETE")
             and scope.get("path", "").startswith("/api/runs")
-            and auth.lower().startswith("bearer ")
-        ):
-            await self.app(scope, receive, send)  # upload/delete check UPLOAD_TOKEN themselves
+        ) or (scope.get("method") == "POST" and scope.get("path") == "/api/runs/import")
+        if token_route and auth.lower().startswith("bearer "):
+            await self.app(
+                scope, receive, send
+            )  # upload/import/delete check UPLOAD_TOKEN themselves
             return
         if password_ok(auth, self.password):
             await self.app(scope, receive, send)

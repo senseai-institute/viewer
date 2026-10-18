@@ -24,11 +24,11 @@ ENV UV_COMPILE_BYTECODE=1 \
 RUN pip install --no-cache-dir uv==0.8.22
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --extra s3 --no-install-project
 COPY README.md LICENSE NOTICE ./
 COPY server ./server
 COPY --from=web /app/server/senseai_viewer/static ./server/senseai_viewer/static
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --extra s3 --no-editable
 
 FROM ${PYTHON_IMAGE} AS app
 ENV PYTHONDONTWRITEBYTECODE=1 \
