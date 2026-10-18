@@ -43,6 +43,7 @@ class Settings:
     stack_dir: Path | None = None
     panther_tokens_profile: Path | None = None
     setup_script: Path | None = None
+    research_url: str | None = None
 
     @property
     def dsec_root(self) -> Path:
@@ -97,4 +98,5 @@ class Settings:
             stack_dir=_path("SENSEAI_STACK_DIR"),
             panther_tokens_profile=_path("SENSEAI_PANTHER_TOKENS_PROFILE"),
             setup_script=_path("SENSEAI_SETUP_SCRIPT"),
+            research_url=os.environ.get("RESEARCH_URL") or None,
         )

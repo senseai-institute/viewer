@@ -644,3 +644,27 @@ packages/senseai-viewer/
   examples/demo_run.py
   docs/screenshot-replay.png
 ```
+
+## The Research page
+
+`/research` is the evidence ledger and research assistant from
+[senseai-research](https://github.com/senseai-institute/research). It lets a biologist check
+where each species-library value came from, correct it in plain language, see what the
+correction does to Panther, and approve or reject the change.
+
+- Set `RESEARCH_URL` (for example `http://127.0.0.1:8100`, where `senseai-research serve`
+  listens) and the **Research** link appears in the top bar. Without it the link is hidden and
+  `/api/research/*` answers 404.
+- The viewer forwards `/api/research/*` to that server, streaming its Server-Sent Events
+  unbuffered. The viewer password still applies. The proxy adds `X-SenseAI-User`: the
+  Basic-auth user name when the browser sent one, else `senseai`. A header of that name sent
+  by the browser is dropped.
+- Layout: the conversation on the left, with tool steps as small chips (never raw JSON) and
+  Approve/Reject cards that need a one-sentence reason. On the right are tabs for **Claim**
+  (value, units, species, conditions, status, full history), **Source** (the passage with the
+  quote highlighted, and a DOI link), **Impact** (which robot settings read the value, what
+  changes, and whether the world model reads it) and **Experiment** (before and after per arm,
+  with the chance hit rate beside each hit rate). **Open the run in Compare** links the
+  experiment's RunLogs into this viewer.
+
+![Research page: a proposed change with its quote, approved; the claim's history on the right](docs/screenshot-research.png)
