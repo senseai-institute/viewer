@@ -7,6 +7,7 @@
 import { api, Chunks, type RunIndex } from "../api/client.ts";
 import { copyLink, el, helpDialog, topbar } from "../components/chrome.ts";
 import { Scene } from "../panels/scene.ts";
+import { benchSection, gtNote } from "../panels/contest.ts";
 import { Explain, headToHead } from "../panels/side.ts";
 import { Timeline } from "../panels/timeline.ts";
 import { bindKeys, Transport } from "../panels/transport.ts";
@@ -55,6 +56,8 @@ export async function comparePage(root: HTMLElement, pathRun: string | null): Pr
 
   root.replaceChildren(topbar({ run: cmp.a.run_id, title: `${labA} vs ${labB} — ${idxA.title}`, synthetic: idxA.synthetic || idxB.synthetic, current: "compare" }));
   const main = el("main", "compare");
+  const gt = gtNote(idxA);
+  if (gt) root.append(gt);
   root.append(main);
 
   const mkSide = (run: string, pipeline: string, idx: RunIndex, chunks: Chunks, color: string, cls: string): [SideState, HTMLElement] => {
@@ -149,6 +152,7 @@ export async function comparePage(root: HTMLElement, pathRun: string | null): Pr
   const trWrap = el("div", "transport-wrap");
   trWrap.append(transport.root);
   main.append(wa, mid, wb, trWrap, tlWrap);
+  if (cmp.same_run) void benchSection(idxA, cmp.b.pipeline).then((s) => s && root.append(s));
 
   timeline.onSeek = (t) => player.seek(t);
   timeline.onFire = (f) => player.seek(f.pipeline === cmp.b.pipeline && !cmp.same_run ? f.t_s - offset : f.t_s);

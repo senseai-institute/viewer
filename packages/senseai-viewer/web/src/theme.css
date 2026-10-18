@@ -337,3 +337,17 @@ input.steps { width: 110px; }
   .check-msg { grid-column: 2; }
   table.grid.data { display: block; overflow-x: auto; }
 }
+
+/* ---- bench runs: ground-truth note, all contestants, report ---- */
+.note-banner { margin: 12px 20px 0; padding: 10px 14px; border: 1px solid var(--warn); border-radius: var(--radius); color: var(--text); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); font-size: 14px; }
+.video-page .note-banner { margin: 0 0 14px; }
+.bench-section { display: grid; gap: 14px; padding: 0 20px 24px; }
+.contest .badge { margin-left: 8px; }
+.md-table { overflow-x: auto; }
+.report details + details { margin-top: 12px; }
+.report summary { cursor: pointer; margin: 0; }
+.md { font-size: 14px; line-height: 1.5; }
+.md h2, .md h3, .md h4 { margin: 18px 0 8px; }
+.md blockquote { margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--panel-2); }
+.md code { font-family: var(--mono); font-size: 12px; }
+.md table { margin: 8px 0; }

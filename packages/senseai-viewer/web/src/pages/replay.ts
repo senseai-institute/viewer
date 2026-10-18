@@ -14,6 +14,7 @@ import { Timeline } from "../panels/timeline.ts";
 import { bindKeys, Transport } from "../panels/transport.ts";
 import { fireInForce, fireNear, sample } from "../sample.ts";
 import { LAYERS, type LayerId, parseLayers, Player, UrlState } from "../state/player.ts";
+import { benchSection, gtNote } from "../panels/contest.ts";
 
 export const A_COLOR = "#5EEAD4";
 export const B_COLOR = "#A9B4CA";
@@ -25,7 +26,10 @@ export function startTime(idx: RunIndex): number {
 
 export function labelOf(idx: RunIndex, name: string): string {
   const p = idx.pipelines.find((x) => x.name === name);
-  return p ? profileLabel(p.profile, p.profile_version) : name;
+  if (!p) return name;
+  // A bench arm has a plain label ("Panther", "Standard camera AI (torchvision)"); a
+  // synthetic or SDK run names pipelines by profile ("Panther v0", "default").
+  return p.label && p.label !== p.name ? p.label : profileLabel(p.profile, p.profile_version);
 }
 
 export function scaleLegend(colorblind: boolean): HTMLElement {
@@ -60,6 +64,8 @@ export async function replayPage(root: HTMLElement, run: string, share: boolean)
 
   root.replaceChildren(topbar({ run, title: idx.title, synthetic: idx.synthetic, current: "replay", share }));
   const main = el("main", "replay");
+  const note = gtNote(idx);
+  if (note) root.append(note);
   root.append(main);
 
   const scenePanel = el("section", "panel scene-wrap");
@@ -71,7 +77,8 @@ export async function replayPage(root: HTMLElement, run: string, share: boolean)
 
   const side = el("div", "side");
   const heads = idx.pipelines.find((p) => p.name === profile)?.heads ?? [];
-  let senses = new Senses(heads, other() ? labelOf(idx, other()!) : null);
+  const detectorLabel = (n: string) => (idx.pipelines.find((p) => p.name === n)?.kind === "detector" ? labelOf(idx, n) : null);
+  let senses = new Senses(heads, other() ? labelOf(idx, other()!) : null, detectorLabel(profile));
   const h2h = pair ? headToHead(idx.head_to_head, labelOf(idx, pair[0]), labelOf(idx, pair[1]), [A_COLOR, B_COLOR]) : headToHead(null, "", "");
   const explain = new Explain(idx);
   const feed = new Feed("Events");
@@ -85,7 +92,7 @@ export async function replayPage(root: HTMLElement, run: string, share: boolean)
   const help = helpDialog();
   const setProfile = (n: string) => {
     profile = n;
-    const fresh = new Senses(idx.pipelines.find((p) => p.name === n)?.heads ?? [], other() ? labelOf(idx, other()!) : null);
+    const fresh = new Senses(idx.pipelines.find((p) => p.name === n)?.heads ?? [], other() ? labelOf(idx, other()!) : null, detectorLabel(n));
     senses.root.replaceWith(fresh.root);
     senses = fresh;
     feed.set(idx.events.filter((e) => e.pipeline === n), idx.fires.filter((f) => f.pipeline === n));
@@ -130,6 +137,7 @@ export async function replayPage(root: HTMLElement, run: string, share: boolean)
   const trWrap = el("div", "transport-wrap");
   trWrap.append(transport.root);
   main.append(scenePanel, side, tlWrap, trWrap);
+  void benchSection(idx, pair?.[1] ?? null).then((s) => s && root.append(s));
 
   timeline.onSeek = (t) => player.seek(t);
   timeline.onFire = (f) => {
