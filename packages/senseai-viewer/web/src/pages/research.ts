@@ -50,6 +50,14 @@ interface ExperimentView {
   progress: { frac?: number; message?: string } | null;
 }
 
+interface KeyVar { name: string; aliases: string[]; secret: boolean; set: boolean }
+interface Service {
+  id: string; name: string; group: string; purpose: string; need: "required" | "recommended" | "optional" | "none";
+  without: string; get_key: string; state: "set" | "partial" | "not_set" | "no_key"; vars: KeyVar[]; checkable: boolean;
+}
+interface SettingsPage { groups: string[]; integrations: Service[]; where: string }
+interface KeyCheck { id: string; ok: boolean; detail: string; cached: boolean }
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) {
@@ -75,6 +83,8 @@ const rapi = {
       body: JSON.stringify({ rationale }),
     }),
   openRun: (id: string) => json<{ run_ids: string[] }>(`/api/research-open/${encodeURIComponent(id)}`, { method: "POST" }),
+  settings: () => json<SettingsPage>("/api/research/settings"),
+  checkKey: (id: string) => json<KeyCheck>(`/api/research/settings/${encodeURIComponent(id)}/check`, { method: "POST" }),
 };
 
 /** POST a message and read the Server-Sent Events the research server streams back. */
@@ -146,7 +156,92 @@ function prose(text: string): HTMLElement {
 
 // ------------------------------------------------------------------ page
 
-type Tab = "claim" | "source" | "impact" | "experiment";
+type Tab = "claim" | "source" | "impact" | "experiment" | "settings";
+
+const NEED_TEXT: Record<Service["need"], string> = {
+  required: "Required", recommended: "Recommended", optional: "Optional", none: "No key needed",
+};
+
+function keyState(s: Service): string {
+  if (s.state === "no_key") return "No key needed";
+  if (s.state === "set") return "Set";
+  const missing = s.vars.filter((v) => !v.set).map((v) => v.name);
+  return s.state === "partial" ? `Partly set; missing ${missing.join(", ")}` : "Not set";
+}
+
+/** Text with any https:// address turned into a link that opens in a new tab. */
+function linked(text: string): HTMLElement {
+  const span = el("span");
+  let at = 0;
+  for (const m of text.matchAll(/https?:\/\/[^\s)]+/g)) {
+    span.append(text.slice(at, m.index));
+    const a = el("a", undefined, m[0]) as HTMLAnchorElement;
+    a.href = m[0];
+    a.target = "_blank";
+    a.rel = "noopener";
+    span.append(a);
+    at = (m.index ?? 0) + m[0].length;
+  }
+  span.append(text.slice(at));
+  return span;
+}
+
+/** The Settings tab: each outside service, whether its key is set, and a live test. Keys are
+ * set on the research server (Railway variables or research.env); this page never sees them. */
+function settingsView(page: SettingsPage): HTMLElement {
+  const wrap = el("div", "settings-view");
+  wrap.append(el("p", "muted", page.where));
+  for (const g of page.groups) {
+    wrap.append(el("h3", "section-name", g));
+    const table = el("table", "grid settings-table");
+    const head = el("tr");
+    for (const h of ["Service", "Needed", "Key", ""]) head.append(el("th", undefined, h));
+    table.append(head);
+    for (const s of page.integrations.filter((i) => i.group === g)) {
+      const tr = el("tr");
+      tr.dataset.service = s.id;
+      tr.dataset.state = s.state;
+      const name = el("td");
+      const more = el("details", "service-more");
+      more.append(el("summary", undefined, s.name));
+      more.append(el("p", undefined, s.purpose));
+      const without = el("p");
+      without.append(el("strong", undefined, "Without it: "), s.without);
+      const get = el("p");
+      get.append(el("strong", undefined, "Get a key: "), linked(s.get_key));
+      more.append(without, get);
+      name.append(more);
+      const key = el("td");
+      key.append(el("span", `key-state ${s.state}`, keyState(s)));
+      for (const v of s.vars) key.append(el("div", "var-name", v.name));
+      const test = el("td", "key-test");
+      if (s.checkable) {
+        const btn = el("button", "btn small", "Test") as HTMLButtonElement;
+        const out = el("span", "check-result");
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          out.textContent = "testing…";
+          out.className = "check-result";
+          try {
+            const r = await rapi.checkKey(s.id);
+            out.textContent = r.detail;
+            out.className = `check-result ${r.ok ? "ok" : "problem"}`;
+          } catch (e) {
+            out.textContent = `could not test: ${(e as Error).message}`;
+            out.className = "check-result problem";
+          } finally {
+            btn.disabled = false;
+          }
+        });
+        test.append(btn, out);
+      }
+      tr.append(name, el("td", `need ${s.need}`, NEED_TEXT[s.need]), key, test);
+      table.append(tr);
+    }
+    wrap.append(table);
+  }
+  return wrap;
+}
 
 export async function researchPage(root: HTMLElement): Promise<void> {
   document.title = "Research · SenseAI Viewer";
@@ -182,9 +277,12 @@ export async function researchPage(root: HTMLElement): Promise<void> {
   const body = el("div", "tab-body");
   const panes: Record<Tab, HTMLElement> = {
     claim: el("div", "pane"), source: el("div", "pane"), impact: el("div", "pane"), experiment: el("div", "pane"),
+    settings: el("div", "pane"),
   };
   const tabBtns: Record<string, HTMLButtonElement> = {};
-  const labels: [Tab, string][] = [["claim", "Claim"], ["source", "Source"], ["impact", "Impact"], ["experiment", "Experiment"]];
+  const labels: [Tab, string][] = [
+    ["claim", "Claim"], ["source", "Source"], ["impact", "Impact"], ["experiment", "Experiment"], ["settings", "Settings"],
+  ];
   for (const [t, label] of labels) {
     const b = el("button", "tab", label);
     b.setAttribute("role", "tab");
@@ -206,11 +304,21 @@ export async function researchPage(root: HTMLElement): Promise<void> {
       source: "When the assistant finds a passage in a paper, it shows here with the quote highlighted.",
       impact: "When the assistant works out what a change does, the affected robot settings show here.",
       experiment: "Bench results on night recordings show here, with the chance hit rate beside every hit rate.",
+      settings: "loading the list of outside services…",
     }[t];
   }
   function show(t: Tab): void {
     for (const [k, b] of Object.entries(tabBtns)) b.setAttribute("aria-selected", String(k === t));
     for (const [k, p] of Object.entries(panes)) p.hidden = k !== t;
+    if (t === "settings") void openSettings();
+  }
+
+  async function openSettings(): Promise<void> {
+    try {
+      panes.settings.replaceChildren(settingsView(await rapi.settings()));
+    } catch (e) {
+      panes.settings.replaceChildren(el("p", "error", `Could not load the settings: ${(e as Error).message}`));
+    }
   }
   show("claim");
 

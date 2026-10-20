@@ -400,6 +400,21 @@ td.chance { color: var(--muted); }
 .error { color: var(--alert); }
 .experiment-view { overflow-x: auto; }
 .experiment-table td, .experiment-table th { white-space: nowrap; }
+.settings-table { table-layout: fixed; width: 100%; }
+.settings-table th:nth-child(1) { width: 32%; }
+.settings-table th:nth-child(2) { width: 24%; }
+.settings-table th:nth-child(3) { width: 28%; }
+.settings-table td { vertical-align: top; }
+.settings-table details.service-more summary { cursor: pointer; }
+.settings-table details.service-more p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+.settings-table td.need.required { color: var(--warn); }
+.settings-table .key-state.set { color: var(--teal); }
+.settings-table .key-state.partial, .settings-table .key-state.not_set { color: var(--warn); }
+.settings-table .key-state.no_key { color: var(--muted); }
+.settings-table .var-name { font: 12px/1.4 var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.settings-table .check-result { display: block; margin-top: 4px; font-size: 13px; color: var(--muted); }
+.settings-table .check-result.ok { color: var(--teal); }
+.settings-table .check-result.problem { color: var(--alert); }
 /* ---- bench runs: ground-truth note, all contestants, report ---- */
 .note-banner { margin: 12px 20px 0; padding: 10px 14px; border: 1px solid var(--warn); border-radius: var(--radius); color: var(--text); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); font-size: 14px; }
 .video-page .note-banner { margin: 0 0 14px; }

@@ -240,6 +240,57 @@ def make_app() -> FastAPI:
             },
         }
 
+    @app.get("/api/research/settings")
+    def settings() -> dict[str, Any]:
+        def svc(
+            id_: str, name: str, group: str, need: str, state: str, names: list[str]
+        ) -> dict[str, Any]:
+            return {
+                "id": id_,
+                "name": name,
+                "group": group,
+                "purpose": f"What {name} is used for.",
+                "need": need,
+                "without": "Searches run on the shared allowance.",
+                "get_key": "https://openalex.org/settings/api (free account)",
+                "state": state,
+                "vars": [
+                    {"name": n, "aliases": [], "secret": True, "set": state == "set"} for n in names
+                ],
+                "checkable": True,
+            }
+
+        return {
+            "groups": ["Assistant", "Finding papers"],
+            "integrations": [
+                svc(
+                    "anthropic",
+                    "Anthropic (Claude)",
+                    "Assistant",
+                    "required",
+                    "set",
+                    ["ANTHROPIC_API_KEY"],
+                ),
+                svc(
+                    "openalex",
+                    "OpenAlex",
+                    "Finding papers",
+                    "recommended",
+                    "not_set",
+                    ["OPENALEX_API_KEY"],
+                ),
+                svc("europepmc", "Europe PMC", "Finding papers", "none", "no_key", []),
+            ],
+            "where": "Keys are set as environment variables on the research server. On Railway: "
+            "the research service, Variables tab.",
+        }
+
+    @app.post("/api/research/settings/{sid}/check")
+    def check(sid: str, x_senseai_user: str | None = Header(None)) -> dict[str, Any]:
+        if not x_senseai_user:
+            raise HTTPException(401, "no signed-in user")
+        return {"id": sid, "ok": True, "detail": "working", "cached": False}
+
     @app.get("/api/research/experiments/{eid}")
     def experiment(eid: str) -> dict[str, Any]:
         return {

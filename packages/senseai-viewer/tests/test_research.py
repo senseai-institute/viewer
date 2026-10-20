@@ -157,5 +157,15 @@ def test_research_page(servers: str) -> None:
         page.locator("#tab-claim").click()
         assert page.locator("ol.history li").count() == 2
         page.screenshot(path=str(DOCS / "screenshot-research.png"), full_page=False)
+        page.locator("#tab-settings").click()
+        page.wait_for_selector(".settings-table")
+        assert page.locator("tr[data-service='anthropic']").get_attribute("data-state") == "set"
+        openalex = page.locator("tr[data-service='openalex']")
+        assert "Not set" in openalex.inner_text() and "OPENALEX_API_KEY" in openalex.inner_text()
+        assert "No key needed" in page.locator("tr[data-service='europepmc']").inner_text()
+        openalex.get_by_role("button", name="Test").click()
+        page.wait_for_selector("tr[data-service='openalex'] .check-result.ok")
+        assert "Railway" in page.locator(".settings-view").inner_text()
+        page.screenshot(path=str(DOCS / "screenshot-research-settings.png"), full_page=False)
         assert errors == []
         browser.close()
