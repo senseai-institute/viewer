@@ -24,6 +24,18 @@ ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 OPEN_PATHS = {"/api/health", "/healthz"}
 
 
+def basic_user(header: str | None) -> str | None:
+    """Return the user name in an ``Authorization: Basic …`` header, if there is one."""
+    if not header or not header.lower().startswith("basic "):
+        return None
+    try:
+        decoded = base64.b64decode(header[6:].strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    user, _, _ = decoded.partition(":")
+    return user.strip() or None
+
+
 def password_ok(header: str | None, password: str) -> bool:
     """Whether an ``Authorization: Basic …`` header carries ``password``."""
     if not header or not header.lower().startswith("basic "):

@@ -26,6 +26,7 @@ from senseai_viewer.auth import BasicAuth
 from senseai_viewer.live import add_video_routes
 from senseai_viewer.readers.runlog import RunLog, RunLogError
 from senseai_viewer.readers.window import ALL_LAYERS, DEFAULT_LAYERS, WindowParams, build_window
+from senseai_viewer.research import add_research_routes
 from senseai_viewer.settings import Settings
 from senseai_viewer.store import Store
 
@@ -377,6 +378,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/run/status")
     def run_status() -> dict[str, object]:
         return {"enabled": cfg.runner}
+
+    add_research_routes(app, cfg, store)
 
     # ------------------------------------------------------------------ web app
 

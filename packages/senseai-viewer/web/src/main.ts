@@ -9,6 +9,7 @@
 //   /replay/{run}          the detailed view
 //   /compare/{run}         compare the run's default pair; /compare?a=run:pipe&b=run:pipe
 //   /incidents/{run}       incidents
+//   /research              the research assistant and evidence ledger (when RESEARCH_URL is set)
 // "demo" as {run} means the first synthetic run on the server.
 
 import "./theme.css";
@@ -17,6 +18,7 @@ import { el, features } from "./components/chrome.ts";
 import { comparePage } from "./pages/compare.ts";
 import { incidentsPage } from "./pages/incidents.ts";
 import { replayPage } from "./pages/replay.ts";
+import { researchPage } from "./pages/research.ts";
 import { runsPage } from "./pages/runs.ts";
 import { runPage } from "./pages/run.ts";
 import { storyPage } from "./pages/story.ts";
@@ -34,8 +36,10 @@ async function route(root: HTMLElement): Promise<void> {
   const parts = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const [page, arg] = parts;
   features.runner = await run.status().then((o) => o.enabled, () => false);
+  features.research = await fetch("/api/research-status").then((r) => (r.ok ? r.json() : { enabled: false })).then((o) => !!o.enabled, () => false);
   if (!page) return features.runner ? runPage(root) : simpleView(root, await resolve("demo"), storyPage);
   if (page === "run") return runPage(root);
+  if (page === "research") return researchPage(root);
   if ((page === "s" || page === "story") && arg) return simpleView(root, await resolve(arg), storyPage);
   if (page === "runs") return runsPage(root);
   if (page === "replay" && arg) return replayPage(root, await resolve(arg), false);
